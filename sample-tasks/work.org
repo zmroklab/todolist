@@ -1,0 +1,41 @@
+#+TITLE: Work
+
+* DONE [#A] Ship quarterly qqq report :report2:urgent:
+  CLOSED: [2026-07-19 Sun 12:15] DEADLINE: <2026-07-23 Thu>
+  :PROPERTIES:
+  :Effort:   3h
+  :ADDED:    [2026-07-18 Sat]
+  :END:
+  Draft is in the shared folder. Details
+** TODO saaa
+  :PROPERTIES:
+  :ADDED:   [2026-07-19 Sun]
+  :END:
+* TODO [#B] Refactor org parser :api:
+  :PROPERTIES:
+  :Effort:   2h
+  :ADDED:    [2026-07-15 Wed]
+  :END:
+* DONE [#C] Update onboarding docs
+  CLOSED: [2026-07-19 Sun 12:15] DEADLINE: <2026-07-18 Sat>
+** DONE iOS
+  CLOSED: [2026-07-18 Sat 17:08]
+  :PROPERTIES:
+  :ADDED:   [2026-07-18 Sat]
+  :END:
+** TODO Android
+  :PROPERTIES:
+  :ADDED:   [2026-07-18 Sat]
+  :END:
+** TODO iOS2
+  :PROPERTIES:
+  :ADDED:   [2026-07-18 Sat]
+  :END:
+* DONE Set up repo
+  CLOSED: [2026-07-16 Thu 11:00]
+* TODO Plan team offsite :planning:
+** DONE Book venue
+  CLOSED: [2026-07-19 Sun 12:15] DEADLINE: <2026-07-24 Fri>
+** TODO Draft agenda ~1h
+** DONE Poll for dates
+   CLOSED: [2026-07-16 Thu 11:00]

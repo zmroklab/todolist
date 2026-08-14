@@ -1,0 +1,2097 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Org Todo</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect x='1' y='1' width='14' height='14' rx='3.5' fill='none' stroke='%232563eb' stroke-width='1.8'/><path d='M4.4 8.2 L7 10.8 L11.8 5.6' fill='none' stroke='%232563eb' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root { --bg:#fafafa; --fg:#1a1a1a; --muted:#777; --line:#e4e4e4; --sel:#dbeafe; --accent:#2563eb; }
+* { box-sizing: border-box; }
+body { margin:0; font:14px/1.45 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+header { position:sticky; top:0; background:var(--bg); border-bottom:1px solid var(--line); padding:10px 16px; z-index:2; }
+#quickadd { width:100%; font:inherit; padding:8px 10px; border:1px solid var(--line); border-radius:8px; }
+#hint { font:12px/1.4 ui-monospace, monospace; color:var(--muted); min-height:16px; margin-top:4px; }
+#filterbar { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:6px; }
+#share-ind { background:var(--accent); color:#fff; border-radius:999px; padding:2px 10px; font-size:12px; }
+#share-ind.err { background:#b3261e; }
+#search { font:inherit; padding:4px 8px; border:1px solid var(--line); border-radius:6px; width:160px; }
+#sort { font:inherit; font-size:11px; padding:2px 4px; border:1px solid var(--line); border-radius:6px; background:none; color:inherit; }
+main { max-width:860px; margin:0 auto; padding:12px 16px 80px; }
+h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); border-bottom:1px solid var(--line); padding-bottom:4px; margin:18px 0 6px; }
+h3 { font-size:13px; color:var(--muted); margin:10px 0 2px; }
+.task { display:flex; align-items:center; gap:8px; padding:5px 8px; border-radius:8px; cursor:default; flex-wrap:wrap; }
+.task.sel { background:var(--sel); outline:1px solid var(--accent); }
+.task.sel-dup { background:#eff6ff; outline:1px dashed #93c5fd; }
+.task.sub { margin-left:28px; }
+.parent-ctx { color:var(--muted); }
+.pri { width:20px; height:20px; border-radius:6px; font:bold 12px/20px system-ui; text-align:center; color:#fff; flex:none; }
+.pri-A { background:#dc2626; } .pri-B { background:#d97706; } .pri-C { background:#9ca3af; }
+.pri-none { background:transparent; color:var(--muted); }
+.title { flex:1 1 0; min-width:200px; }
+.st-DONE .title { text-decoration:line-through; color:var(--muted); }
+.st-NEXT .title { font-weight:600; }
+.meta { display:flex; gap:4px; align-items:center; flex-wrap:wrap; }
+.chip { font-size:11px; padding:1px 7px; border-radius:999px; background:#eee; color:#444; border:none; cursor:pointer; font-family:inherit; }
+.chip.topic { background:#e0e7ff; }
+.chip.dl-overdue { background:#dc2626; color:#fff; }
+.chip.dl-today { background:#ea580c; color:#fff; }
+.chip.dl-week { background:#f59e0b; color:#fff; }
+.chip.on { background:var(--accent); color:#fff; }
+.chip.fold { background:#e5e7eb; font-weight:600; }
+.chip.note { background:transparent; border:1px solid var(--line); color:var(--muted); cursor:default; }
+.body { flex-basis:100%; margin:2px 0 4px 28px; color:#333; }
+.body img { max-width:100%; border:1px solid var(--line); border-radius:6px; display:block; margin:4px 0; }
+.bline { white-space:pre-wrap; font-size:13px; }
+.title a, .body a { color:var(--accent); text-decoration:underline; }
+.st-DONE .title a { color:inherit; }
+.editor input { width:100%; font:inherit; padding:6px 8px; border:1px solid var(--accent); border-radius:6px; }
+.editor textarea { width:100%; font:inherit; padding:6px 8px; border:1px solid var(--accent); border-radius:6px; resize:vertical; }
+#banner { background:#fef3c7; border:1px solid #f59e0b; margin:12px 16px; padding:10px 12px; border-radius:8px; }
+#banner button { margin-left:8px; }
+#toast { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:#111; color:#fff; padding:8px 14px; border-radius:8px; z-index:9; }
+#help { position:fixed; inset:10% 20%; overflow:auto; background:#fff; border:1px solid var(--line); border-radius:12px; box-shadow:0 8px 30px rgba(0,0,0,.15); padding:20px 24px; z-index:8; }
+#help kbd { background:#eee; border-radius:4px; padding:1px 6px; font:12px ui-monospace, monospace; }
+#help td { padding:2px 10px 2px 0; }
+#done-toggle { cursor:pointer; }
+#help-btn { margin-left:auto; width:24px; height:24px; border-radius:50%; border:1px solid var(--line); background:#fff; color:var(--muted); font:bold 13px/22px system-ui; cursor:pointer; }
+#help-btn:hover { border-color:var(--accent); color:var(--accent); }
+#help-close { position:absolute; top:12px; right:14px; border:none; background:none; font-size:16px; color:var(--muted); cursor:pointer; }
+#help p { margin:6px 0; max-width:60ch; }
+#help code { background:#eee; border-radius:4px; padding:1px 5px; font:12px ui-monospace, monospace; }
+#files-panel, #share-panel { position:fixed; inset:15% 25%; overflow:auto; background:#fff; border:1px solid var(--line); border-radius:12px; box-shadow:0 8px 30px rgba(0,0,0,.15); padding:20px 24px; z-index:8; }
+.frow { display:flex; gap:10px; align-items:center; padding:5px 8px; border-radius:8px; }
+.frow.sel { background:var(--sel); outline:1px solid var(--accent); }
+.frow .fname { flex:1 1 auto; }
+.frow .fsrc { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.04em; border:1px solid var(--line); border-radius:4px; padding:0 5px; }
+.frow .fstatus { color:var(--muted); font-size:12px; }
+.frow.muted { color:var(--muted); }
+#files-panel input { width:100%; font:inherit; padding:6px 8px; border:1px solid var(--accent); border-radius:6px; }
+#files-hint { color:var(--muted); font-size:12px; margin-top:10px; }
+#share-panel input { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:6px; }
+.srow { display:flex; gap:8px; align-items:center; padding:5px 0; }
+.srow .sname { flex:0 0 130px; }
+.srow .sexpr { flex:1 1 auto; }
+.srow .serr { color:#b3261e; font-size:12px; white-space:nowrap; }
+#share-hint { color:var(--muted); font-size:12px; margin-top:10px; }
+[hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<header id="topbar">
+  <input id="quickadd" placeholder="+ add task…   work: Title #A :tag: @fri ~2h" autocomplete="off">
+  <div id="hint"></div>
+  <div id="filterbar">
+    <input id="search" placeholder="/ search" autocomplete="off">
+    <button class="chip flt" data-k="deadline" data-v="overdue">overdue</button>
+    <button class="chip flt" data-k="deadline" data-v="today">today</button>
+    <button class="chip flt" data-k="deadline" data-v="week">week</button>
+    <button class="chip flt" data-k="priority" data-v="A">A</button>
+    <button class="chip flt" data-k="priority" data-v="B">B</button>
+    <button class="chip flt" data-k="priority" data-v="C">C</button>
+    <select id="sort" title="backlog order — r cycles">
+      <option value="topic">order: topic</option>
+      <option value="priority">by priority</option>
+      <option value="deadline">by deadline</option>
+      <option value="created-desc">newest first</option>
+      <option value="created-asc">oldest first</option>
+    </select>
+    <select id="share" title="share filter — S cycles"></select>
+    <span id="share-ind" hidden></span>
+    <span id="active-flt"></span>
+    <button id="help-btn" title="Help &amp; shortcuts (?)">?</button>
+  </div>
+</header>
+<div id="banner" hidden></div>
+<main>
+  <section id="radar"><h2>On the radar</h2><div id="radar-list"></div></section>
+  <section id="backlog"><h2>Backlog</h2><div id="backlog-list"></div></section>
+  <section id="done"><h2 id="done-toggle">Done (<span id="done-count">0</span>)</h2><div id="done-list" hidden></div></section>
+</main>
+<div id="help" hidden>
+<button id="help-close" title="Close (Esc)">✕</button>
+<h2>How it works</h2>
+<p>Your tasks are plain org-mode files you connect individually — one file per
+topic (<code>work.org</code> → topic “work”). Edit them here or in any text
+editor; the page picks up outside changes within ~2 seconds and writes your
+UI edits back as clean org, never touching lines it doesn't understand.</p>
+<p><b>Where files live.</b> Press <kbd>F</kbd>, then <kbd>c</kbd> to connect a
+local folder (desktop Chrome/Edge only) or <kbd>g</kbd> to connect Google Drive.
+Drive syncs one folder across all your devices — including phones, where local
+folders aren't available.</p>
+<p><b>On the radar</b> = every <code>NEXT</code> task plus anything due within
+7 days. The backlog below is grouped by topic, in file order; the order dropdown (or
+<kbd>r</kbd>) re-sorts it by priority, deadline, or when tasks were added.
+Finished tasks collapse into <b>Done</b> at the bottom (click it to expand).</p>
+<h2>Adding tasks</h2>
+<p>Type in the input at the top (or press <kbd>a</kbd>). Only the title is
+required; tokens fill in the rest, in any order:</p>
+<p><code>work: Ship report #A :urgent: @jul22 ~3h</code></p>
+<table>
+<tr><td><code>work:</code></td><td>topic file (defaults to last used)</td></tr>
+<tr><td><code>#A #B #C</code></td><td>priority</td></tr>
+<tr><td><code>:tag:</code> or <code>:a:b:</code></td><td>tags</td></tr>
+<tr><td><code>@2026-07-22 @jul22 @07-30 @tom @fri</code></td><td>deadline</td></tr>
+<tr><td><code>+1w +2d +3m +1y</code></td><td>repeat the deadline every week/day/month/year (needs a deadline)</td></tr>
+<tr><td><code>~30m ~2h ~1.5h ~1d</code></td><td>estimate</td></tr>
+</table>
+<p>Press <kbd>A</kbd> on a selected task to add a sub-task (<code>** TODO</code>,
+one level deep) under it — same tokens, no topic. Sub-tasks show indented under
+their parent when it is expanded (<kbd>Enter</kbd>/<kbd>o</kbd>) and get their
+own radar rows when they qualify.</p>
+<p>Press <kbd>N</kbd> to write notes under a task; select a task and paste a
+screenshot (<kbd>Cmd+V</kbd>) to attach it —
+saved to <code>images/</code> and shown when the task is expanded.
+Click any tag or topic chip to filter by it; <kbd>Esc</kbd> clears filters.</p>
+<h2>Share filters</h2>
+<p>For screen sharing: the <b>share</b> dropdown applies a named preset that
+limits what is visible everywhere — lists, Done, search, and file names. A
+preset is words separated by <code>and</code> (optional): a bare word shows
+only tasks whose topic or tag matches it (several words = any of them);
+<code>!word</code> hides every match and always wins. Example:
+<code>flo and !elena and !volha</code>. Sub-tasks inherit their parent's tags.
+<kbd>S</kbd> cycles presets; <kbd>Esc</kbd> never turns them off. A broken
+expression shows nothing rather than risking a leak.</p>
+<h2>Shortcuts</h2>
+<table>
+<tr><td><kbd>j</kbd>/<kbd>k</kbd> or arrows</td><td>move cursor</td></tr>
+<tr><td><kbd>Enter</kbd>/<kbd>o</kbd></td><td>expand / collapse (notes + sub-tasks)</td></tr>
+<tr><td><kbd>Alt+↑</kbd>/<kbd>Alt+↓</kbd></td><td>move task up / down</td></tr>
+<tr><td><kbd>r</kbd></td><td>cycle backlog order (topic / priority / deadline / newest / oldest)</td></tr>
+<tr><td><kbd>S</kbd></td><td>cycle share filter (off / presets)</td></tr>
+<tr><td><kbd>m</kbd></td><td>move task to another file</td></tr>
+<tr><td><kbd>y</kbd></td><td>copy title to clipboard</td></tr>
+<tr><td><kbd>Y</kbd></td><td>copy org block (with sub-tasks) to clipboard</td></tr>
+<tr><td><kbd>X</kbd></td><td>delete task (asks to confirm)</td></tr>
+<tr><td><kbd>a</kbd></td><td>add task</td></tr>
+<tr><td><kbd>A</kbd></td><td>add sub-task under the selected task</td></tr>
+<tr><td><kbd>F</kbd></td><td>manage connected files</td></tr>
+<tr><td><kbd>e</kbd></td><td>edit heading (title #A :tag: @date ~2h)</td></tr>
+<tr><td><kbd>n</kbd></td><td>toggle NEXT (radar)</td></tr>
+<tr><td><kbd>d</kbd></td><td>toggle DONE — or, on a repeating task, advance its deadline one interval</td></tr>
+<tr><td><kbd>D</kbd></td><td>roll a repeating task's deadline back one interval (undo)</td></tr>
+<tr><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>0</kbd></td><td>priority A / B / C / none</td></tr>
+<tr><td><kbd>s</kbd></td><td>set deadline (add <code>+1w</code> etc. to repeat)</td></tr>
+<tr><td><kbd>&gt;</kbd> / <kbd>&lt;</kbd></td><td>move deadline +1 / −1 day</td></tr>
+<tr><td><kbd>t</kbd></td><td>edit tags</td></tr>
+<tr><td><kbd>E</kbd></td><td>edit estimate</td></tr>
+<tr><td><kbd>N</kbd></td><td>edit notes (Cmd/Ctrl+Enter saves)</td></tr>
+<tr><td><kbd>/</kbd></td><td>search</td></tr>
+<tr><td><kbd>Esc</kbd></td><td>clear filters / close</td></tr>
+<tr><td><kbd>?</kbd></td><td>this help</td></tr>
+</table>
+</div>
+<div id="files-panel" hidden>
+<h2>Connected files</h2>
+<div id="files-list"></div>
+<p id="files-hint"></p>
+</div>
+<div id="share-panel" hidden>
+<h2>Share filter presets</h2>
+<div id="share-list"></div>
+<p id="share-hint">Words match a topic or a tag; <code>!word</code> hides every
+match and wins; <code>and</code> between words is optional.
+Example: <code>flo and !elena and !volha</code>. Esc closes.</p>
+</div>
+<div id="toast" hidden></div>
+<script>
+// ===== CORE START =====
+const Core = (() => {
+
+  // --- dates ---
+  const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const WEEKDAYS = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+  const MONTHS = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+  const pad = n => String(n).padStart(2, '0');
+
+  function dayName(iso) { return DAYS[new Date(iso + 'T12:00:00Z').getUTCDay()]; }
+  function addDays(iso, n) {
+    const d = new Date(iso + 'T12:00:00Z');
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate());
+  }
+  function addInterval(iso, sign, repeat) {
+    const m = /^\+(\d+)([dwmy])$/.exec(repeat || '');
+    if (!m) return null;
+    const n = (+m[1]) * sign, unit = m[2];
+    if (unit === 'd') return addDays(iso, n);
+    if (unit === 'w') return addDays(iso, n * 7);
+    // m / y: shift year-month, then clamp day to the target month's last day
+    let [y, mo, d] = iso.split('-').map(Number);
+    if (unit === 'y') y += n;
+    else { mo += n; y += Math.floor((mo - 1) / 12); mo = ((mo - 1) % 12 + 12) % 12 + 1; }
+    const lastDay = new Date(Date.UTC(y, mo, 0)).getUTCDate(); // day 0 of next month
+    if (d > lastDay) d = lastDay;
+    return y + '-' + pad(mo) + '-' + pad(d);
+  }
+  function orgActive(iso, repeat) { return '<' + iso + ' ' + dayName(iso) + (repeat ? ' ' + repeat : '') + '>'; }
+  function orgInactive(iso) { return '[' + iso + ' ' + dayName(iso) + ']'; }
+
+  function parseDateToken(tok, today) {
+    tok = tok.toLowerCase();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(tok)) return tok;
+    if (tok === 'today') return today;
+    if (tok === 'tomorrow' || tok === 'tom') return addDays(today, 1);
+    const wi = WEEKDAYS.findIndex(w => w === tok || w.slice(0, 3) === tok);
+    if (wi >= 0) {
+      const delta = (wi - new Date(today + 'T12:00:00Z').getUTCDay() + 7) % 7;
+      return addDays(today, delta === 0 ? 7 : delta);
+    }
+    const m = tok.match(/^([a-z]{3})(\d{1,2})$/);
+    if (m && MONTHS.includes(m[1])) {
+      const y = +today.slice(0, 4);
+      const iso = y + '-' + pad(MONTHS.indexOf(m[1]) + 1) + '-' + pad(+m[2]);
+      return iso < today ? (y + 1) + iso.slice(4) : iso;
+    }
+    const n = tok.match(/^(\d{1,2})-(\d{1,2})$/);
+    if (n) {
+      const y = +today.slice(0, 4);
+      const first = y + '-' + pad(+n[1]) + '-' + pad(+n[2]);
+      const iso = first < today ? (y + 1) + first.slice(4) : first;
+      const d = new Date(iso + 'T12:00:00Z');
+      return d.getUTCMonth() + 1 === +n[1] && d.getUTCDate() === +n[2] ? iso : null;
+    }
+    return null;
+  }
+
+  // --- org parser ---
+  const HEADING_RE = /^(\*{1,2})\s+(?:(TODO|NEXT|DONE)\s+)?(?:\[#([ABC])\]\s+)?(.*)$/;
+  const TAGS_RE = /\s+(:[A-Za-z0-9_@#%:]+:)\s*$/;
+  const PLANNING_RE = /^\s*(?:DEADLINE|SCHEDULED|CLOSED):/;
+
+  function parseHeading(line) {
+    const m = line.match(HEADING_RE);
+    let title = m[4] || '';
+    let tags = [];
+    const tm = title.match(TAGS_RE);
+    if (tm) { tags = tm[1].slice(1, -1).split(':'); title = title.slice(0, tm.index); }
+    return { state: m[2] || null, priority: m[3] || null, title: title.trim(), tags };
+  }
+
+  function parsePlanning(line, t) {
+    const dm = line.match(/DEADLINE:\s*<(\d{4}-\d{2}-\d{2})[^>]*?(?:\s+(\+\d+[dwmy]))?>/);
+    if (dm) { t.deadline = dm[1]; t.repeat = dm[2] || null; }
+    const cm = line.match(/CLOSED:\s*\[([^\]]+)\]/);
+    if (cm) t.closed = cm[1];
+    const sm = line.match(/SCHEDULED:\s*[<\[][^>\]]+[>\]]/);
+    if (sm) t.scheduledRaw = sm[0].trim();
+  }
+
+  function parseNode(raw, level) {
+    const lines = raw.replace(/\n$/, '').split('\n');
+    const h = parseHeading(lines[0]);
+    const t = { raw, dirty: false, level, children: [], state: h.state, priority: h.priority,
+                title: h.title, tags: h.tags, deadline: null, repeat: null, closed: null, scheduledRaw: null,
+                propLines: [], body: [], added: null, effort: null };
+    let i = 1;
+    while (i < lines.length && PLANNING_RE.test(lines[i])) { parsePlanning(lines[i], t); i++; }
+    if (i < lines.length && /^\s*:PROPERTIES:\s*$/i.test(lines[i])) {
+      const end = lines.findIndex((l, j) => j > i && /^\s*:END:\s*$/i.test(l));
+      if (end > -1) { t.propLines = lines.slice(i + 1, end); i = end + 1; }
+    }
+    t.body = lines.slice(i);
+    for (const pl of t.propLines) {
+      let pm;
+      if ((pm = pl.match(/^\s*:Effort:\s*(\S.*?)\s*$/i))) t.effort = pm[1];
+      if ((pm = pl.match(/^\s*:ADDED:\s*\[(\d{4}-\d{2}-\d{2})[^\]]*\]/i))) t.added = pm[1];
+    }
+    return t;
+  }
+
+  function parseTaskBlock(raw) {
+    const cuts = [];
+    const re = /\n\*\* /g;
+    let m;
+    while ((m = re.exec(raw))) cuts.push(m.index + 1);
+    const t = parseNode(cuts.length ? raw.slice(0, cuts[0]) : raw, 1);
+    for (let i = 0; i < cuts.length; i++) {
+      t.children.push(parseNode(raw.slice(cuts[i], i + 1 < cuts.length ? cuts[i + 1] : raw.length), 2));
+    }
+    return t;
+  }
+
+  function parseOrg(text) {
+    const starts = [];
+    if (text.startsWith('* ')) starts.push(0);
+    const re = /\n\* /g;
+    let m;
+    while ((m = re.exec(text))) starts.push(m.index + 1);
+    const file = { preamble: starts.length ? text.slice(0, starts[0]) : text, tasks: [] };
+    for (let i = 0; i < starts.length; i++) {
+      const raw = text.slice(starts[i], i + 1 < starts.length ? starts[i + 1] : text.length);
+      file.tasks.push(parseTaskBlock(raw));
+    }
+    return file;
+  }
+
+  // --- serializer + mutations ---
+  function renderTask(t) {
+    let head = '*'.repeat(t.level || 1) + ' ';
+    if (t.state) head += t.state + ' ';
+    if (t.priority) head += '[#' + t.priority + '] ';
+    head += t.title;
+    if (t.tags.length) head += ' :' + t.tags.join(':') + ':';
+    const lines = [head];
+    const plan = [];
+    if (t.closed) plan.push('CLOSED: [' + t.closed + ']');
+    if (t.deadline) plan.push('DEADLINE: ' + orgActive(t.deadline, t.repeat));
+    if (t.scheduledRaw) plan.push(t.scheduledRaw);
+    if (plan.length) lines.push('  ' + plan.join(' '));
+    if (t.propLines.length) lines.push('  :PROPERTIES:', ...t.propLines, '  :END:');
+    lines.push(...t.body);
+    return lines.join('\n') + '\n';
+  }
+
+  const nodeText = t => t.dirty ? renderTask(t) : t.raw;
+  function serializeFile(file) {
+    return file.preamble +
+      file.tasks.map(t => nodeText(t) + t.children.map(nodeText).join('')).join('');
+  }
+
+  const touch = t => { t.dirty = true; };
+  function setState(t, state, now) {
+    t.state = state;
+    t.closed = state === 'DONE' && now ? now.iso + ' ' + dayName(now.iso) + ' ' + now.hm : null;
+    touch(t);
+  }
+  function advanceRepeat(t, dir) {
+    if (!t.repeat || !t.deadline) return;
+    const next = addInterval(t.deadline, dir, t.repeat);
+    if (!next) return;
+    t.deadline = next;
+    if (dir === 1 && t.state === 'DONE') { t.state = 'TODO'; t.closed = null; }
+    touch(t);
+  }
+  function setPriority(t, p) { t.priority = p; touch(t); }
+  function setTitle(t, s) { t.title = s; touch(t); }
+  function setTags(t, tags) { t.tags = tags; touch(t); }
+  function setDeadline(t, iso, repeat = null) { t.deadline = iso; t.repeat = iso ? repeat : null; touch(t); }
+  function bumpDeadline(t, delta, today) {
+    setDeadline(t, t.deadline ? addDays(t.deadline, delta) : today, t.repeat);
+  }
+  function setProp(t, key, value) {
+    const re = new RegExp('^\\s*:' + key + ':', 'i');
+    const idx = t.propLines.findIndex(l => re.test(l));
+    if (value == null) { if (idx > -1) t.propLines.splice(idx, 1); }
+    else if (idx > -1) t.propLines[idx] = '  :' + key + ':   ' + value;
+    else t.propLines.push('  :' + key + ':   ' + value);
+    touch(t);
+  }
+  function setEffort(t, v) { t.effort = v; setProp(t, 'Effort', v); }
+  function appendBody(t, line) { t.body.push('  ' + line); touch(t); }
+  // two-space indent doubles as a guarantee: no note line can sit at column 0,
+  // so an edit can never fabricate a '*'/'**' heading and split the block;
+  // verbatim '***'+ lines are exempt and stay at column 0 (only '*'/'**'-shaped
+  // lines are what the indent guards against, since only those split blocks)
+  function setBody(t, lines) { t.body = lines.map(l => l.trim() ? (/^\*\*\*/.test(l) ? l : '  ' + l) : ''); touch(t); }
+
+  function makeTask(fields, todayIso) {
+    const t = { raw: '', dirty: true, level: 1, children: [], state: 'TODO', priority: fields.priority || null,
+                title: fields.title, tags: fields.tags || [], deadline: fields.deadline || null,
+                repeat: fields.repeat || null, closed: null, scheduledRaw: null, propLines: [], body: [],
+                added: todayIso, effort: null };
+    setProp(t, 'ADDED', orgInactive(todayIso));
+    if (fields.effort) setEffort(t, fields.effort);
+    return t;
+  }
+
+  function normalizeNewlines(file) {
+    for (const t of file.tasks) {
+      if (t.raw && !t.raw.endsWith('\n')) t.raw += '\n';
+      for (const c of t.children) if (c.raw && !c.raw.endsWith('\n')) c.raw += '\n';
+    }
+  }
+  function moveTask(file, from, to, parent) {
+    const list = parent ? parent.children : file.tasks;
+    if (to < 0 || to >= list.length || from === to) return false;
+    const [t] = list.splice(from, 1);
+    list.splice(to, 0, t);
+    normalizeNewlines(file);
+    return true;
+  }
+  function addTask(file, parent, t) {
+    t.level = parent ? 2 : 1;
+    (parent ? parent.children : file.tasks).push(t);
+    normalizeNewlines(file);
+    return t;
+  }
+
+  const blockText = t => nodeText(t) + t.children.map(nodeText).join('');
+  const subtreeText = t => { const b = blockText(t); return b.endsWith('\n') ? b : b + '\n'; };
+  function taskBlock(file, index) {
+    const t = file.tasks[index];
+    if (!t) return null;
+    const b = blockText(t);
+    return b.endsWith('\n') ? b : b + '\n';
+  }
+  function removeTaskAt(file, index) {
+    const block = taskBlock(file, index);
+    if (block == null) return null;
+    file.tasks.splice(index, 1);
+    normalizeNewlines(file);
+    return block;
+  }
+  function removeSubtaskAt(file, parentIndex, childIndex) {
+    const parent = file.tasks[parentIndex];
+    const child = parent && parent.children[childIndex];
+    if (parentIndex < 0 || childIndex < 0 || !child) return null;
+    const b = nodeText(child);
+    parent.children.splice(childIndex, 1);
+    normalizeNewlines(file);
+    return b.endsWith('\n') ? b : b + '\n';
+  }
+  function appendRaw(file, block) {
+    if (!block.endsWith('\n')) block += '\n';
+    if (!file.tasks.length && file.preamble && !file.preamble.endsWith('\n')) file.preamble += '\n';
+    const t = parseTaskBlock(block);
+    file.tasks.push(t);
+    normalizeNewlines(file);
+    return t;
+  }
+
+  // --- quick-add tokens ---
+  function parseQuickAdd(input, today) {
+    let s = input.trim();
+    const out = { topic: null, title: '', priority: null, tags: [], deadline: null, repeat: null, effort: null };
+    const tm = s.match(/^([\w-]+):\s+/);
+    if (tm) { out.topic = tm[1].toLowerCase(); s = s.slice(tm[0].length); }
+    const titleWords = [];
+    for (const w of s.split(/\s+/).filter(Boolean)) {
+      let m;
+      if ((m = w.match(/^#([ABCabc])$/))) out.priority = m[1].toUpperCase();
+      else if ((m = w.match(/^:([A-Za-z0-9_@#%:-]+):$/))) out.tags.push(...m[1].split(':').filter(Boolean));
+      else if ((m = w.match(/^@(\S+)$/)) && parseDateToken(m[1], today)) out.deadline = parseDateToken(m[1], today);
+      else if ((m = w.match(/^\+\d+[dwmy]$/))) out.repeat = w;
+      else if ((m = w.match(/^~(\d+(?:\.\d+)?[hmd])$/))) out.effort = m[1];
+      else titleWords.push(w);
+    }
+    if (!out.deadline) out.repeat = null;
+    out.title = titleWords.join(' ');
+    return out;
+  }
+
+  // --- share filters (privacy presets) ---
+  // Terms are whitespace-separated; "and" between terms is optional sugar.
+  // Bare word = include, !word = exclude. Malformed input returns { error }.
+  function parseShareExpr(str) {
+    const include = [], exclude = [];
+    const tokens = String(str || '').trim().split(/\s+/).filter(Boolean);
+    let last = 'start';
+    for (const tok of tokens) {
+      if (/^and$/i.test(tok)) {
+        if (last !== 'term') return { error: '"and" needs a term on each side' };
+        last = 'and';
+        continue;
+      }
+      const neg = tok.startsWith('!');
+      const word = neg ? tok.slice(1) : tok;
+      if (!word) return { error: 'dangling "!"' };
+      if (/^and$/i.test(word)) return { error: '"and" cannot be a term' };
+      if (!/^[A-Za-z0-9_@#%-]+$/.test(word)) return { error: 'bad characters in "' + tok + '"' };
+      (neg ? exclude : include).push(word.toLowerCase());
+      last = 'term';
+    }
+    if (last === 'and') return { error: '"and" needs a term on each side' };
+    return { include, exclude };
+  }
+
+  function matchesShare(topic, task, parentTask, expr) {
+    if (!expr || expr.error) return false;   // fail closed
+    const hay = new Set([topic.toLowerCase(),
+                         ...task.tags.map(t => t.toLowerCase()),
+                         ...(parentTask ? parentTask.tags.map(t => t.toLowerCase()) : [])]);
+    if (expr.exclude.some(w => hay.has(w))) return false;
+    if (expr.include.length && !expr.include.some(w => hay.has(w))) return false;
+    return true;
+  }
+
+  // Whether a topic's *file name* may appear in chrome (files panel, pick list).
+  // Deliberately stricter than matchesShare: a topic outside the include list is
+  // hidden even though a tag could theoretically match one of its tasks.
+  function shareTopicVisible(topic, expr) {
+    if (!expr || expr.error) return false;
+    const t = topic.toLowerCase();
+    if (expr.exclude.includes(t)) return false;
+    if (expr.include.length && !expr.include.includes(t)) return false;
+    return true;
+  }
+
+  // --- view model ---
+  const PRI_ORDER = { A: 0, B: 1, C: 2 };
+  const priRank = p => (p in PRI_ORDER ? PRI_ORDER[p] : 3);
+
+  function deadlineBucket(iso, today) {
+    if (!iso) return null;
+    if (iso < today) return 'overdue';
+    if (iso === today) return 'today';
+    if (iso <= addDays(today, 7)) return 'week';
+    return 'later';
+  }
+
+  function buildModel(files, today) {
+    const horizon = addDays(today, 7);
+    const refs = [];
+    for (const f of files) f.file.tasks.forEach((task, index) => {
+      refs.push({ topic: f.topic, index, task });
+      task.children.forEach((child, ci) =>
+        refs.push({ topic: f.topic, index, ci, task: child, parent: task }));
+    });
+    const open = refs.filter(r => r.task.state !== 'DONE');
+    const done = refs.filter(r => !r.parent && r.task.state === 'DONE');
+    const radar = open.filter(r => r.task.state === 'NEXT' || (r.task.deadline && r.task.deadline <= horizon));
+    radar.sort((a, b) => {
+      const ad = a.task.deadline || '9999', bd = b.task.deadline || '9999';
+      if (ad !== bd) return ad < bd ? -1 : 1;
+      return priRank(a.task.priority) - priRank(b.task.priority);
+    });
+    const radarSet = new Set(radar);
+    const backlogByTopic = [];
+    for (const f of files) {
+      const list = open.filter(r => !r.parent && r.topic === f.topic && !radarSet.has(r));
+      if (list.length) backlogByTopic.push([f.topic, list]);
+    }
+    return { radar, backlogByTopic, done };
+  }
+
+  function matchesFilter(r, flt, today) {
+    const t = r.task;
+    if (flt.priority && t.priority !== flt.priority) return false;
+    if (flt.tag && !t.tags.includes(flt.tag)) return false;
+    if (flt.topic && r.topic !== flt.topic) return false;
+    if (flt.deadline) {
+      const b = deadlineBucket(t.deadline, today);
+      if (flt.deadline === 'week') { if (!['week', 'today', 'overdue'].includes(b)) return false; }
+      else if (b !== flt.deadline) return false;
+    }
+    if (flt.text) {
+      const hay = (t.title + ' ' + t.tags.join(' ') + ' ' + r.topic).toLowerCase();
+      if (!hay.includes(flt.text.toLowerCase())) return false;
+    }
+    return true;
+  }
+
+  function matchesFamily(r, flt, today) {
+    if (matchesFilter(r, flt, today)) return true;
+    return r.task.children.some(c => matchesFilter({ topic: r.topic, task: c }, flt, today));
+  }
+
+  function sortBacklog(refs, mode) {
+    const dir = mode === 'created-desc' ? -1 : 1;
+    const val = r => mode === 'priority' ? priRank(r.task.priority)
+      : mode === 'deadline' ? r.task.deadline
+      : r.task.added;
+    return [...refs].sort((a, b) => {
+      const av = val(a), bv = val(b);
+      if (av == null) return bv == null ? 0 : 1;   // missing values always last, even desc
+      if (bv == null) return -1;
+      return av === bv ? 0 : (av < bv ? -1 : 1) * dir;
+    });
+  }
+
+  // --- linkify (render-only; never mutates tasks) ---
+  const ORG_LINK_RE = /\[\[(https?:\/\/[^\]\[]+)\](?:\[([^\]]*)\])?\]/g;
+  // must end on a char that is not trailing punctuation, so "url." keeps the dot out
+  const BARE_URL_RE = /https?:\/\/[^\s\]>]*[^\s\]>.,;:!?'")}]/g;
+
+  function linkifyBare(s, out) {
+    let last = 0, m;
+    BARE_URL_RE.lastIndex = 0;
+    while ((m = BARE_URL_RE.exec(s))) {
+      if (m.index > last) out.push({ text: s.slice(last, m.index) });
+      out.push({ url: m[0], label: m[0] });
+      last = m.index + m[0].length;
+    }
+    if (last < s.length) out.push({ text: s.slice(last) });
+  }
+
+  function linkify(text) {
+    const out = [];
+    let last = 0, m;
+    ORG_LINK_RE.lastIndex = 0;
+    while ((m = ORG_LINK_RE.exec(text))) {
+      if (m.index > last) linkifyBare(text.slice(last, m.index), out);
+      out.push({ url: m[1], label: m[2] || m[1] });
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) linkifyBare(text.slice(last), out);
+    return out;
+  }
+
+  return { version: 1, dayName, addDays, addInterval, orgActive, orgInactive, parseDateToken, parseOrg,
+           renderTask, serializeFile, setState, advanceRepeat, setPriority, setTitle, setTags, setDeadline, bumpDeadline,
+           setProp, setEffort, appendBody, setBody, makeTask, moveTask, addTask, parseQuickAdd,
+           taskBlock, removeTaskAt, removeSubtaskAt, appendRaw, subtreeText,
+           deadlineBucket, buildModel, matchesFilter, matchesFamily, sortBacklog, linkify,
+           parseShareExpr, matchesShare, shareTopicVisible };
+})();
+// ===== CORE END =====
+// ===== APP =====
+const $ = s => document.querySelector(s);
+const div = cls => { const d = document.createElement('div'); d.className = cls; return d; };
+const span = cls => { const s = document.createElement('span'); s.className = cls; return s; };
+
+const App = {
+  files: [],
+  filter: { deadline: null, priority: null, tag: null, topic: null, text: '' },
+  sort: 'topic',
+  sel: null, selPos: 0,
+  expanded: new Set(),
+  visible: [],
+  lastTopic: localStorage.getItem('lastTopic') || null,
+  panel: { open: false, idx: 0, mode: 'list', backend: null, names: [], checked: new Set() },
+  share: { presets: loadSharePresets(), active: localStorage.getItem('shareActive') },
+  sharePanel: { open: false },
+};
+
+function todayIso() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function nowHm() {
+  const d = new Date();
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+function taskKey(t) { return (t.dirty || !t.raw ? Core.renderTask(t) : t.raw).split('\n', 1)[0]; }
+// '\t' separator: topics are filenames and never contain tabs, so the first
+// tab always splits topic from heading (headings may contain anything).
+function refKey(r) {
+  return r.topic + '\t' + (r.parent ? taskKey(r.parent) + '\t' : '') + taskKey(r.task);
+}
+function keyPath(r) {
+  return r.parent ? [taskKey(r.parent), taskKey(r.task)] : [taskKey(r.task)];
+}
+
+// --- share filters (privacy presets) ---
+function loadSharePresets() {
+  try {
+    const v = JSON.parse(localStorage.getItem('sharePresets') || '[]');
+    return Array.isArray(v) ? v.filter(p => p && typeof p.name === 'string' && typeof p.expr === 'string') : [];
+  } catch { return []; }
+}
+function activePreset() {
+  return App.share.presets.find(p => p.name === App.share.active) || null;
+}
+function shareExpr() {
+  const p = activePreset();          // stale/absent active name = off
+  return p ? Core.parseShareExpr(p.expr) : null;
+}
+function persistSharePresets() {
+  localStorage.setItem('sharePresets', JSON.stringify(App.share.presets));
+}
+function setShareActive(name) {
+  App.share.active = name;
+  if (name) localStorage.setItem('shareActive', name);
+  else localStorage.removeItem('shareActive');
+  render();
+  if (App.panel.open) renderPanel();
+}
+
+// --- tiny IndexedDB kv store (persists the directory handle) ---
+function idb() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open('orgtodo', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('kv');
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function idbGet(k) {
+  const db = await idb();
+  return new Promise((res, rej) => {
+    const t = db.transaction('kv').objectStore('kv').get(k);
+    t.onsuccess = () => res(t.result); t.onerror = () => rej(t.error);
+  });
+}
+async function idbSet(k, v) {
+  const db = await idb();
+  return new Promise((res, rej) => {
+    const t = db.transaction('kv', 'readwrite').objectStore('kv').put(v, k);
+    t.onsuccess = () => res(); t.onerror = () => rej(t.error);
+  });
+}
+async function idbDel(k) {
+  const db = await idb();
+  return new Promise((res, rej) => {
+    const t = db.transaction('kv', 'readwrite').objectStore('kv').delete(k);
+    t.onsuccess = () => res(); t.onerror = () => rej(t.error);
+  });
+}
+
+// --- banner / toast ---
+function banner(msg, btnLabel, onClick) {
+  const b = $('#banner');
+  b.hidden = false;
+  b.replaceChildren(msg + ' ');
+  if (btnLabel) {
+    const btn = document.createElement('button');
+    btn.textContent = btnLabel; btn.onclick = onClick;
+    b.append(btn);
+  }
+}
+function hideBanner() { $('#banner').hidden = true; }
+let toastTimer;
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg; t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 2500);
+}
+
+// --- storage backends ---------------------------------------------------
+// Every connected file carries a `backend`: the connection object that owns
+// ALL of its I/O (read/write/stat, listing, create, images, permissions).
+// FSA (local folders) is the only backend today; Google Drive plugs in behind
+// this same shape. Per-file state (name, handle, version) lives on the entry;
+// the backend reads/updates it. `version` is an opaque change token compared
+// with !== — a numeric mtime for FSA, a Drive revision for GDrive.
+const FSA_OK = !!window.showDirectoryPicker;
+
+function fsaBackend(dir) {
+  const images = create => dir.getDirectoryHandle('images', create ? { create: true } : undefined);
+  return {
+    kind: 'fsa',
+    dir,
+    label: 'local',
+    async list() {                                   // -> [{ name }]
+      const out = [];
+      for await (const [name, h] of dir.entries())
+        if (h.kind === 'file' && name.endsWith('.org')) out.push({ name });
+      return out.sort((a, b) => a.name.localeCompare(b.name));
+    },
+    async open(entry) {                              // resolve file handle (throws if gone)
+      if (!entry.handle) entry.handle = await dir.getFileHandle(entry.name);
+      return entry.handle;
+    },
+    async createEntry(entry) {                       // create-or-open, never clobber
+      entry.handle = await dir.getFileHandle(entry.name, { create: true });
+      return entry.handle;
+    },
+    async stat(entry) { return (await (await this.open(entry)).getFile()).lastModified; },
+    async read(entry) {                              // -> { text, version }
+      const f = await (await this.open(entry)).getFile();
+      return { text: await f.text(), version: f.lastModified };
+    },
+    async write(entry, text) {                       // -> { version }
+      const h = await this.open(entry);
+      const w = await h.createWritable();
+      await w.write(text); await w.close();
+      return { version: (await h.getFile()).lastModified };
+    },
+    async same(other) { return !!other && other.kind === 'fsa' && await dir.isSameEntry(other.dir); },
+    async check() { return (await dir.queryPermission({ mode: 'readwrite' })) === 'granted'; },
+    async grant() { return (await this.check()) || (await dir.requestPermission({ mode: 'readwrite' })) === 'granted'; },
+    // images/ subtree (all no-ops-safe wrappers used by paste/move/render)
+    async hasImages() { try { await images(false); return true; } catch { return false; } },
+    async imageExists(name) { try { await (await images(false)).getFileHandle(name); return true; } catch { return false; } },
+    async imageUrl(name) { return URL.createObjectURL(await (await (await images(false)).getFileHandle(name)).getFile()); },
+    async imageBytes(name) { return (await (await (await images(false)).getFileHandle(name)).getFile()).arrayBuffer(); },
+    async writeImage(name, data) {
+      const fh = await (await images(true)).getFileHandle(name, { create: true });
+      const w = await fh.createWritable();
+      await w.write(data); await w.close();
+    },
+    async removeImage(name) { try { await (await images(false)).removeEntry(name); } catch { /* already gone */ } },
+    descriptor() { return { backend: 'fsa', dir }; },
+  };
+}
+// --- Google Drive backend (works on mobile + desktop; one Drive folder) -----
+// Configure once (Phase 4): create a Google Cloud OAuth Web client ID with your
+// GitHub Pages URL as an authorized JS origin, scope drive.file, and paste it
+// here. Empty = the Drive option stays disabled.
+const GDRIVE_CLIENT_ID = '';   // e.g. '1234-abc.apps.googleusercontent.com'
+const GDRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const GDRIVE_FOLDER = 'org-todo';
+const DRIVE_API = 'https://www.googleapis.com/drive/v3';
+const DRIVE_UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
+const GDRIVE_CONFIGURED = !!GDRIVE_CLIENT_ID;
+const FOLDER_MIME = 'application/vnd.google-apps.folder';
+const qEsc = s => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
+// Google Identity Services token client. Access tokens live ~1h in memory and
+// are re-acquired silently while the Google session is active; interactive only
+// when consent is actually needed.
+const gdriveAuth = {
+  token: null, expiry: 0, client: null,
+  async load() {
+    if (window.google && google.accounts && google.accounts.oauth2) return;
+    await new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = 'https://accounts.google.com/gsi/client';
+      s.async = true; s.onload = res;
+      s.onerror = () => rej(new Error('Could not load Google sign-in'));
+      document.head.append(s);
+    });
+  },
+  async getToken(interactive) {
+    if (this.token && dateNow() < this.expiry - 60000) return this.token;
+    if (!GDRIVE_CONFIGURED) throw new Error('Google Drive not configured');
+    await this.load();
+    if (!this.client) {
+      this.client = google.accounts.oauth2.initTokenClient({
+        client_id: GDRIVE_CLIENT_ID, scope: GDRIVE_SCOPE, callback: () => {},
+      });
+    }
+    return new Promise((res, rej) => {
+      this.client.callback = resp => {
+        if (resp.error) { rej(new Error(resp.error)); return; }
+        this.token = resp.access_token;
+        this.expiry = dateNow() + (resp.expires_in || 3600) * 1000;
+        res(this.token);
+      };
+      this.client.requestAccessToken({ prompt: interactive ? '' : 'none' });
+    });
+  },
+  forget() { this.token = null; this.expiry = 0; },
+};
+const dateNow = () => new Date().getTime();
+
+async function driveFetch(path, opts = {}, base = DRIVE_API) {
+  let token = await gdriveAuth.getToken(false).catch(() => gdriveAuth.getToken(true));
+  const send = () => fetch(base + path, { ...opts, headers: { Authorization: 'Bearer ' + token, ...(opts.headers || {}) } });
+  let r = await send();
+  if (r.status === 401) { gdriveAuth.forget(); token = await gdriveAuth.getToken(true); r = await send(); }
+  if (!r.ok) throw new Error('Drive ' + r.status + ': ' + (await r.text()).slice(0, 140));
+  return r;
+}
+async function driveFindId(name, parent) {         // -> id | null (drive.file: only app's files)
+  const q = `name='${qEsc(name)}' and '${parent}' in parents and trashed=false`;
+  const j = await (await driveFetch(`/files?q=${encodeURIComponent(q)}&fields=files(id)`)).json();
+  return j.files && j.files[0] ? j.files[0].id : null;
+}
+async function driveCreate(meta) {                 // create metadata-only file/folder -> id
+  const r = await driveFetch('/files?fields=id', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(meta) });
+  return (await r.json()).id;
+}
+
+function gdriveBackend(state) {                     // state: { folderId, imagesId?, names? }
+  const names = state.names || new Map();           // name -> fileId cache
+  let imagesId = state.imagesId || null;            // cached images/ subfolder id
+  const ensureImages = async create => {
+    if (imagesId) return imagesId;
+    let id = await driveFindId('images', state.folderId);
+    if (!id && create) id = await driveCreate({ name: 'images', parents: [state.folderId], mimeType: FOLDER_MIME });
+    imagesId = id; return id;
+  };
+  const imageId = async name => { const p = await ensureImages(false); return p ? driveFindId(name, p) : null; };
+  return {
+    kind: 'gdrive',
+    label: 'Drive',
+    folderId: state.folderId,
+    async list() {                                  // -> [{ name }]
+      const q = `'${state.folderId}' in parents and name contains '.org' and trashed=false`;
+      const j = await (await driveFetch(`/files?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=1000`)).json();
+      const out = [];
+      for (const f of (j.files || [])) if (f.name.endsWith('.org')) { names.set(f.name, f.id); out.push({ name: f.name }); }
+      return out.sort((a, b) => a.name.localeCompare(b.name));
+    },
+    async open(entry) {                             // resolve fileId by name (throws if gone)
+      if (entry.handle) return entry.handle;
+      const id = names.get(entry.name) || await driveFindId(entry.name, state.folderId);
+      if (!id) throw new DOMException('not found', 'NotFoundError');
+      names.set(entry.name, id); entry.handle = id; return id;
+    },
+    async createEntry(entry) {                      // create-or-open, never clobber
+      let id = names.get(entry.name) || await driveFindId(entry.name, state.folderId);
+      if (!id) id = await driveCreate({ name: entry.name, parents: [state.folderId], mimeType: 'text/plain' });
+      names.set(entry.name, id); entry.handle = id; return id;
+    },
+    async stat(entry) {                             // -> version token
+      const id = await this.open(entry);
+      const j = await (await driveFetch(`/files/${id}?fields=version,trashed`)).json();
+      if (j.trashed) { entry.handle = null; names.delete(entry.name); throw new DOMException('trashed', 'NotFoundError'); }
+      return j.version;
+    },
+    async read(entry) {                             // -> { text, version }
+      const id = await this.open(entry);
+      const version = (await (await driveFetch(`/files/${id}?fields=version`)).json()).version;
+      const text = await (await driveFetch(`/files/${id}?alt=media`)).text();
+      return { text, version };
+    },
+    async write(entry, text) {                      // -> { version }
+      const id = await this.open(entry);
+      const r = await driveFetch(`/files/${id}?uploadType=media&fields=version`,
+        { method: 'PATCH', headers: { 'Content-Type': 'text/plain' }, body: text }, DRIVE_UPLOAD);
+      return { version: (await r.json()).version };
+    },
+    async same(other) { return !!other && other.kind === 'gdrive' && other.folderId === state.folderId; },
+    async check() { try { await gdriveAuth.getToken(false); return true; } catch { return false; } },
+    async grant() { try { await gdriveAuth.getToken(true); return true; } catch { return false; } },
+    // images/ subfolder inside the Drive app folder
+    async hasImages() { return !!(await ensureImages(false)); },
+    async imageExists(name) { return !!(await imageId(name)); },
+    async imageUrl(name) {
+      const id = await imageId(name); if (!id) throw new Error('missing image');
+      return URL.createObjectURL(await (await driveFetch(`/files/${id}?alt=media`)).blob());
+    },
+    async imageBytes(name) {
+      const id = await imageId(name); if (!id) throw new Error('missing image');
+      return (await driveFetch(`/files/${id}?alt=media`)).arrayBuffer();
+    },
+    async writeImage(name, data) {
+      const parent = await ensureImages(true);
+      const boundary = '----orgtodo' + name.length + name.charCodeAt(0);   // deterministic (scripts ban Math.random)
+      const body = new Blob([
+        `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n`,
+        JSON.stringify({ name, parents: [parent] }),
+        `\r\n--${boundary}\r\nContent-Type: application/octet-stream\r\n\r\n`,
+        data, `\r\n--${boundary}--`,
+      ]);
+      await driveFetch('/files?uploadType=multipart&fields=id',
+        { method: 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + boundary }, body }, DRIVE_UPLOAD);
+    },
+    async removeImage(name) { const id = await imageId(name); if (id) await driveFetch(`/files/${id}`, { method: 'DELETE' }); },
+    descriptor() { return { backend: 'gdrive', folderId: state.folderId }; },
+  };
+}
+
+// find-or-create the single Drive app folder, then connect its .org files
+async function connectGDrive() {
+  if (!GDRIVE_CONFIGURED) { toast('Google Drive isn’t configured yet — add your OAuth client ID in index.html'); return; }
+  const existing = App.files.find(e => e.backend.kind === 'gdrive');
+  try {
+    if (!await gdriveAuth.getToken(true)) { toast('Google sign-in cancelled'); return; }
+    let folderId = existing ? existing.backend.folderId : null;
+    if (!folderId) {
+      const q = `name='${qEsc(GDRIVE_FOLDER)}' and mimeType='${FOLDER_MIME}' and trashed=false`;
+      const j = await (await driveFetch(`/files?q=${encodeURIComponent(q)}&fields=files(id)`)).json();
+      folderId = (j.files && j.files[0]) ? j.files[0].id : await driveCreate({ name: GDRIVE_FOLDER, mimeType: FOLDER_MIME });
+    }
+    const backend = existing ? existing.backend : gdriveBackend({ folderId });
+    const names = (await backend.list()).map(x => x.name).filter(n => !findEntry(n.slice(0, -4)));
+    if (!names.length && !existing && !App.files.some(e => e.backend === backend)) {
+      await createTopicInBackend(backend, 'inbox');   // nothing there yet: seed one file
+      toast('Google Drive connected — created inbox.org');
+    } else {
+      const added = await connectEntries(backend, names);
+      toast(added ? added + ' Drive file(s) connected' : 'Google Drive already connected');
+    }
+    hideBanner();
+  } catch (e) { toast('Google Drive error: ' + e.message); }
+}
+
+function restoreBackend(s) {                          // saved descriptor -> backend
+  if (s.backend === 'fsa' || (!s.backend && s.dir)) return s.dir ? fsaBackend(s.dir) : null;
+  if (s.backend === 'gdrive' && s.folderId) return gdriveBackend({ folderId: s.folderId });
+  return null;                                        // unknown backend: drop
+}
+
+// --- boot / file connections ---
+function makeEntry(backend, name) {
+  return { topic: name.slice(0, -4), name, backend, handle: null,
+           version: 0, text: '', file: null, parseError: false, broken: false };
+}
+async function persistFiles() {
+  await idbSet('files', App.files.map(e => ({ ...e.backend.descriptor(), name: e.name })));
+}
+async function boot() {
+  await idbDel('dir').catch(() => {});   // pre-connections folder key, no migration
+  const saved = await idbGet('files').catch(() => null);
+  if (saved && saved.length) {
+    App.files = saved.map(s => { const b = restoreBackend(s); return b ? makeEntry(b, s.name) : null; }).filter(Boolean);
+    App.files.sort((a, b) => a.topic.localeCompare(b.topic));
+    let granted = true;
+    for (const e of App.files) { if (!await e.backend.check()) { granted = false; break; } }
+    if (granted) return start();
+    banner('File access needs to be re-granted.', 'Reconnect files', regrantAll);
+    return;
+  }
+  if (!FSA_OK) {
+    if (GDRIVE_CONFIGURED) banner('This browser can’t open local folders. Connect Google Drive to use the app here.', 'Connect Google Drive', connectGDrive);
+    else banner('This browser can’t open local folders (needs Chrome/Edge on desktop), and Google Drive isn’t configured yet.');
+    return;
+  }
+  banner('No files connected yet.', 'Connect files', () => openPanel());
+}
+async function regrantAll() {
+  for (const e of App.files) await e.backend.grant();
+  hideBanner();
+  start();
+}
+async function connectNames(dir, names) {            // e2e/legacy entry point: raw FSA dir
+  return connectEntries(fsaBackend(dir), names);
+}
+async function connectEntries(backend, names) {
+  let added = 0;
+  for (const name of names) {
+    const topic = name.slice(0, -4);
+    if (findEntry(topic)) { toast('Topic "' + topic + '" already connected — skipped'); continue; }
+    App.files.push(makeEntry(backend, name));
+    added++;
+  }
+  if (added) {
+    App.files.sort((a, b) => a.topic.localeCompare(b.topic));
+    await persistFiles();
+    hideBanner();
+    await start();
+  }
+  return added;
+}
+let scanning = false;
+let pollTimer = null;
+let pollMs = 0;
+// remote backends cost a network round-trip per poll, so slow the cadence when
+// any non-local file is connected; local-only stays snappy at 1.5s
+function armPoll() {
+  const want = App.files.some(e => e.backend.kind !== 'fsa') ? 5000 : 1500;
+  if (pollTimer && pollMs === want) return;
+  if (pollTimer) clearInterval(pollTimer);
+  pollMs = want;
+  pollTimer = setInterval(scanTick, want);
+}
+async function start() {
+  await scanTick();
+  armPoll();
+}
+async function scanTick() {
+  if (scanning || !App.files.length) return;
+  scanning = true;
+  try {
+    if (await scanOnce()) render();
+  } catch (e) {
+    if (e.name === 'NotAllowedError' || e.name === 'SecurityError') {
+      clearInterval(pollTimer); pollTimer = null;
+      banner('File access was lost.', 'Reconnect files', regrantAll);
+    }
+  } finally {
+    scanning = false;
+  }
+}
+
+// --- scanning: poll each connected file's version token, no dir enumeration ---
+async function scanOnce() {
+  let changed = false;
+  for (const entry of App.files) {
+    try {
+      const version = await entry.backend.stat(entry);
+      if (entry.broken) { entry.broken = false; changed = true; }
+      if (version !== entry.version) {
+        entry.version = version;
+        entry.text = (await entry.backend.read(entry)).text;
+        try { entry.file = Core.parseOrg(entry.text); entry.parseError = false; }
+        catch (e) { entry.parseError = true; }
+        changed = true;
+      }
+    } catch (e) {
+      if (e.name === 'NotAllowedError' || e.name === 'SecurityError') throw e;
+      entry.handle = null;                      // deleted/renamed on disk: broken, recoverable
+      if (!entry.broken) { entry.broken = true; changed = true; }
+    }
+  }
+  return changed;
+}
+
+// --- rendering ---
+const SORT_CYCLE = ['topic', 'priority', 'deadline', 'created-desc', 'created-asc'];
+const SORT_LABELS = { priority: 'by priority', deadline: 'by deadline',
+                      'created-desc': 'newest first', 'created-asc': 'oldest first' };
+function render() {
+  const today = todayIso();
+  const files = App.files.filter(e => e.file && !e.parseError && !e.broken).map(e => ({ topic: e.topic, file: e.file }));
+  const model = Core.buildModel(files, today);
+  const sx = shareExpr();
+  const shareOk = r => !sx || Core.matchesShare(r.topic, r.task, r.parent || null, sx);
+  const pass = r => shareOk(r) && Core.matchesFilter(r, App.filter, today);
+  const passFam = r => shareOk(r) && (Core.matchesFilter(r, App.filter, today) || r.task.children.some(c => pass({ topic: r.topic, task: c, parent: r.task })));
+  let radar = model.radar.filter(r => r.parent ? pass(r) : passFam(r));
+  let groups = model.backlogByTopic.map(([t, l]) => [t, l.filter(passFam)]).filter(([, l]) => l.length);
+  const done = model.done.filter(passFam);
+  if (App.sort !== 'topic') {
+    const open = groups.flatMap(([, l]) => l);
+    groups = open.length ? [[SORT_LABELS[App.sort], Core.sortBacklog(open, App.sort)]] : [];
+  }
+
+  App.visible = [];
+  $('#radar-list').replaceChildren(...radar.flatMap(rowsFor));
+  $('#radar').hidden = !radar.length;
+  const bl = [];
+  for (const [topic, list] of groups) {
+    const h = document.createElement('h3');
+    h.textContent = topic;
+    bl.push(h, ...list.flatMap(rowsFor));
+  }
+  $('#backlog-list').replaceChildren(...bl);
+  $('#done-count').textContent = done.length;
+  const showDone = !$('#done-list').hidden;
+  $('#done-list').replaceChildren(...(showDone ? done.flatMap(rowsFor) : []));
+
+  const broken = App.files.filter(e => e.parseError);
+  const b = $('#banner');
+  if (broken.length) {
+    const visBroken = sx ? broken.filter(e => Core.shareTopicVisible(e.topic, sx)) : broken;
+    const names = visBroken.map(e => e.topic + '.org');
+    if (broken.length > visBroken.length) names.push((broken.length - visBroken.length) + ' hidden file(s)');
+    banner('Could not parse: ' + names.join(', ') + ' — hidden from the list, file left untouched.');
+  } else if (!b.hidden && b.textContent.startsWith('Could not parse')) {
+    hideBanner();
+  }
+
+  // selection: keep by key, fall back to same position
+  let idx = App.visible.findIndex(r => refKey(r) === App.sel);
+  // duplicate keys resolve to the first match; stay on the copy selPos was on
+  if (idx !== -1 && App.selPos < App.visible.length &&
+      refKey(App.visible[App.selPos]) === App.sel) idx = App.selPos;
+  if (idx === -1 && App.visible.length) {
+    idx = Math.min(App.selPos, App.visible.length - 1);
+    App.sel = refKey(App.visible[idx]);
+  }
+  if (idx === -1) App.sel = null; else App.selPos = idx;
+  updateSelClass();
+  renderFilterState();
+}
+
+function updateSelClass() {
+  // duplicate data-rk (radar copy + nested copy): the row at selPos is the
+  // current one; any other match gets the lighter echo
+  const rows = [...document.querySelectorAll('.task')];
+  const cur = rows[App.selPos]?.dataset.rk === App.sel
+    ? rows[App.selPos] : rows.find(el => el.dataset.rk === App.sel);
+  for (const el of rows) {
+    el.classList.toggle('sel', el === cur);
+    el.classList.toggle('sel-dup', el !== cur && el.dataset.rk === App.sel);
+  }
+}
+
+function renderLinkified(el, text) {
+  for (const seg of Core.linkify(text)) {
+    if (seg.url) {
+      const a = document.createElement('a');
+      a.href = seg.url;
+      a.textContent = seg.label;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.draggable = false;
+      a.onclick = e => e.stopPropagation();
+      el.append(a);
+    } else {
+      el.append(seg.text);
+    }
+  }
+}
+function taskRow(ref, mode) {
+  const t = ref.task;
+  App.visible.push(ref);
+  const row = div('task' + (mode === 'sub' ? ' sub' : ''));
+  row.dataset.rk = refKey(ref);
+  if (t.state) row.classList.add('st-' + t.state);
+  const pri = div('pri ' + (t.priority ? 'pri-' + t.priority : 'pri-none'));
+  pri.textContent = t.priority || '·';
+  const title = div('title');
+  if (mode === 'ctx' && ref.parent) {
+    const c = span('parent-ctx');
+    const sx = shareExpr();
+    c.textContent = (sx && !Core.matchesShare(ref.topic, ref.parent, null, sx) ? '…' : ref.parent.title) + ' › ';
+    title.append(c);
+  }
+  if (t.title) renderLinkified(title, t.title);
+  else title.append('(untitled)');
+  const meta = div('meta');
+  const topic = span('chip topic');
+  topic.textContent = ref.topic;
+  topic.onclick = ev => { ev.stopPropagation(); App.filter.topic = ref.topic; render(); };
+  meta.append(topic);
+  for (const tg of t.tags) {
+    const c = span('chip tag');
+    c.textContent = tg;
+    c.onclick = ev => { ev.stopPropagation(); App.filter.tag = tg; render(); };
+    meta.append(c);
+  }
+  if (t.deadline) {
+    const b = span('chip dl-' + (Core.deadlineBucket(t.deadline, todayIso()) || 'later'));
+    b.textContent = '⏰ ' + t.deadline.slice(5);
+    meta.append(b);
+  }
+  if (t.repeat) {
+    const rc = span('chip rpt');
+    rc.textContent = '🔁 ' + t.repeat.slice(1);
+    meta.append(rc);
+  }
+  if (t.effort) {
+    const e = span('chip eff');
+    e.textContent = '~' + t.effort;
+    meta.append(e);
+  }
+  if (t.children.length) {
+    const fc = span('chip fold');
+    fc.textContent = (App.expanded.has(row.dataset.rk) ? '▾ ' : '▸ ') + t.children.length;
+    fc.onclick = ev => {
+      ev.stopPropagation();
+      const rk = row.dataset.rk;
+      App.expanded.has(rk) ? App.expanded.delete(rk) : App.expanded.add(rk);
+      render();
+    };
+    meta.append(fc);
+  }
+  if (t.body.some(l => l.trim())) {
+    const nb = span('chip note');
+    nb.textContent = '≡';
+    meta.append(nb);
+  }
+  row.append(pri, title, meta);
+  // this row's own index in App.visible (ref was pushed just above) — a key
+  // lookup would normalize duplicate keys to the first (radar) copy
+  const pos = App.visible.length - 1;
+  row.onclick = () => {
+    App.sel = row.dataset.rk;
+    App.selPos = pos;
+    updateSelClass();
+  };
+  row.draggable = true;
+  row.ondragstart = e => {
+    if (App.sort !== 'topic') { e.preventDefault(); toast('Reordering needs topic order'); return; }
+    e.dataTransfer.setData('text/plain', row.dataset.rk);
+  };
+  row.ondragover = e => e.preventDefault();
+  row.ondrop = async e => {
+    e.preventDefault();
+    if (App.sort !== 'topic') { toast('Reordering needs topic order'); return; }
+    const fromRk = e.dataTransfer.getData('text/plain');
+    const toRk = row.dataset.rk;
+    if (!fromRk || fromRk === toRk) return;
+    const from = App.visible.find(r => refKey(r) === fromRk);
+    const to = App.visible.find(r => refKey(r) === toRk);
+    if (!from || !to) return;
+    if (from.topic !== to.topic) { toast('Drag within one topic'); return; }
+    const fromParent = from.parent ? taskKey(from.parent) : null;
+    const toParent = to.parent ? taskKey(to.parent) : null;
+    if (fromParent !== toParent) { toast('Drag within one parent'); return; }
+    const entry = findEntry(from.topic);
+    await saveFile(entry, file => {
+      let list = file.tasks, parent = null;
+      if (fromParent) {
+        parent = file.tasks.find(t => taskKey(t) === fromParent);
+        if (!parent) return;
+        list = parent.children;
+      }
+      // keys are re-resolved here: saveFile may have re-read the file, so 'from'/'to' task objects can be stale
+      const fi = list.findIndex(t => taskKey(t) === taskKey(from.task));
+      const ti = list.findIndex(t => taskKey(t) === taskKey(to.task));
+      if (fi > -1 && ti > -1) Core.moveTask(file, fi, ti, parent);
+    });
+  };
+  if (App.expanded.has(row.dataset.rk) && t.body.some(l => l.trim())) row.append(bodyView(ref));
+  return row;
+}
+
+function taskRows(ref) {
+  const rows = [taskRow(ref)];
+  const open = App.expanded.has(refKey(ref));
+  const f = App.filter;
+  const filterOn = !!(f.text || f.tag || f.priority || f.deadline || f.topic);
+  const today = todayIso();
+  const sx = shareExpr();
+  ref.task.children.forEach((c, ci) => {
+    const cref = { topic: ref.topic, index: ref.index, ci, task: c, parent: ref.task };
+    if (sx && !Core.matchesShare(cref.topic, cref.task, cref.parent, sx)) return;
+    // a filtered-in child stays visible under a collapsed parent — hiding
+    // search hits behind a fold reads as "no results"
+    if (open || (filterOn && Core.matchesFilter(cref, f, today)))
+      rows.push(taskRow(cref, 'sub'));
+  });
+  return rows;
+}
+const rowsFor = r => r.parent ? [taskRow(r, 'ctx')] : taskRows(r);
+
+const IMG_RE = /^\s*\[\[file:(images\/[^\]]+\.(?:png|jpe?g|gif|webp|svg))\]\]\s*$/i;
+const imgUrls = new Map();
+async function loadImg(img, path, entry) {
+  const key = entry.topic + '|' + path;
+  if (imgUrls.has(key)) { img.src = imgUrls.get(key); return; }
+  try {
+    const url = await entry.backend.imageUrl(path.slice('images/'.length));
+    imgUrls.set(key, url);
+    img.src = url;
+  } catch {
+    img.alt = 'missing: ' + path;
+  }
+}
+function bodyView(ref) {
+  const box = div('body');
+  for (const line of ref.task.body) {
+    const m = line.match(IMG_RE);
+    if (m) {
+      const img = document.createElement('img');
+      const entry = findEntry(ref.topic);
+      if (entry) loadImg(img, m[1], entry); else img.alt = 'missing: ' + m[1];
+      box.append(img);
+    } else if (line.trim()) {
+      const p = div('bline');
+      renderLinkified(p, line.replace(/^ {0,2}/, ''));
+      box.append(p);
+    }
+  }
+  return box;
+}
+
+$('#done-toggle').onclick = () => { $('#done-list').hidden = !$('#done-list').hidden; render(); };
+$('#help-btn').onclick = () => { $('#help').hidden = !$('#help').hidden; };
+$('#help-close').onclick = () => { $('#help').hidden = true; };
+
+// --- write-back ---
+async function saveFile(entry, mutateFn) {
+  if (entry.parseError) { toast('Refusing to write ' + entry.topic + '.org — it did not parse'); return; }
+  try {
+    const version = await entry.backend.stat(entry);
+    if (version !== entry.version) {               // changed on disk since we read it
+      const rd = await entry.backend.read(entry);
+      entry.version = rd.version; entry.text = rd.text;
+      entry.file = Core.parseOrg(entry.text);
+    }
+    mutateFn(entry.file);
+    const out = Core.serializeFile(entry.file);
+    const w = await entry.backend.write(entry, out);
+    entry.version = w.version;
+    entry.text = out;
+    entry.file = Core.parseOrg(out);               // reset raw/dirty to canonical state
+    render();
+    return true;
+  } catch (e) {
+    toast('Write failed: ' + e.message);
+  }
+}
+function findEntry(topic) { return App.files.find(e => e.topic === topic) || null; }
+async function mutateTask(topic, path, fn) {
+  const entry = findEntry(topic);
+  if (!entry) return;
+  await saveFile(entry, file => {
+    let t = file.tasks.find(x => taskKey(x) === path[0]);
+    if (t && path.length > 1) t = t.children.find(c => taskKey(c) === path[1]);
+    if (t) fn(t, file);
+  });
+}
+function selRef() { return App.visible.find(r => refKey(r) === App.sel) || null; }
+async function withSel(fn) {
+  const r = selRef();
+  if (r) await mutateTask(r.topic, keyPath(r), fn);
+}
+async function createTopicInBackend(backend, topic) {
+  const name = topic + '.org';
+  const entry = makeEntry(backend, name);
+  await backend.createEntry(entry);            // existing file: load it, never clobber
+  const rd = await backend.read(entry);
+  entry.version = rd.version; entry.text = rd.text;
+  try { entry.file = Core.parseOrg(entry.text); } catch { entry.parseError = true; }
+  App.files.push(entry);
+  App.files.sort((a, b) => a.topic.localeCompare(b.topic));
+  await persistFiles();
+  hideBanner();
+  armPoll();
+  return entry;
+}
+async function createTopic(topic) {
+  const last = findEntry(App.lastTopic);
+  const base = (last && !last.broken ? last : null) || App.files.find(e => !e.broken);
+  if (!base) { toast('Connect a folder first (F)'); return null; }
+  return createTopicInBackend(base.backend, topic);
+}
+
+function blockImagePaths(block) {
+  const out = new Set();
+  for (const line of block.split('\n')) {
+    const m = line.match(IMG_RE);
+    if (m) out.add(m[1]);
+  }
+  return [...out];
+}
+async function freeImageName(backend, name) {
+  if (!await backend.imageExists(name)) return name;
+  const dot = name.lastIndexOf('.');
+  const base = name.slice(0, dot), ext = name.slice(dot);
+  for (let n = 2; ; n++) {
+    const cand = base + '-' + n + ext;
+    if (!await backend.imageExists(cand)) return cand;
+  }
+}
+// copies each referenced image into the target folder's images/; returns the
+// (possibly reference-rewritten) block plus the source names that were copied
+async function moveBlockImages(block, source, target) {
+  const paths = blockImagePaths(block);
+  if (!paths.length) return { block, moved: [] };
+  if (!await source.backend.hasImages()) {
+    toast('No images/ next to ' + source.name + ' — references moved as-is'); return { block, moved: [] };
+  }
+  const moved = [];
+  for (const p of paths) {
+    const name = p.slice('images/'.length);
+    let data;
+    try { data = await source.backend.imageBytes(name); }
+    catch { toast('Missing image ' + p + ' — reference moved as-is'); continue; }
+    const newName = await freeImageName(target.backend, name);
+    await target.backend.writeImage(newName, data);
+    if (newName !== name)
+      block = block.split('[[file:images/' + name + ']]').join('[[file:images/' + newName + ']]');
+    moved.push(name);
+  }
+  return { block, moved };
+}
+// delete a moved source image only when no connected file sharing that folder
+// still references it (unconnected files can't be checked — accepted trade-off)
+async function cleanupSourceImages(source, moved) {
+  if (!moved.length) return;
+  if (!await source.backend.hasImages()) return;
+  for (const name of moved) {
+    const ref = '[[file:images/' + name + ']]';
+    let still = false;
+    for (const e of App.files) {
+      if (await e.backend.same(source.backend) && (e.text || '').includes(ref)) { still = true; break; }
+    }
+    if (!still) await source.backend.removeImage(name);
+  }
+}
+
+// --- move a task to another file ---
+async function moveSelTo(targetTopic) {
+  const r = selRef();
+  if (!r || r.parent) return;
+  if (targetTopic === r.topic) return;
+  const source = findEntry(r.topic);
+  if (!source || source.parseError || source.broken) return;
+  let target = findEntry(targetTopic);
+  if (!target) {
+    if (!confirm('Create new topic file "' + targetTopic + '.org" next to ' + r.topic + '.org?')) return;
+    target = await createTopicInBackend(source.backend, targetTopic);
+  }
+  if (!target.file || target.parseError || target.broken) { toast('Cannot move into ' + targetTopic + '.org'); return; }
+  // re-read the source fresh before extracting the block: the in-memory parse
+  // can be up to one poll interval stale, and appending a stale block while
+  // removing from a freshly re-read file would silently revert an external edit
+  try {
+    const version = await source.backend.stat(source);
+    if (version !== source.version) {
+      const rd = await source.backend.read(source);
+      source.version = rd.version; source.text = rd.text;
+      source.file = Core.parseOrg(source.text);
+    }
+  } catch (e) {
+    source.parseError = true;
+    toast('Cannot move from ' + r.topic + '.org');
+    return;
+  }
+  const key = taskKey(r.task);
+  const idx = source.file.tasks.findIndex(t => taskKey(t) === key);
+  if (idx === -1) return;
+  let block = Core.taskBlock(source.file, idx);
+  let moved = [];
+  if (!(await source.backend.same(target.backend))) {
+    const res = await moveBlockImages(block, source, target);
+    block = res.block; moved = res.moved;
+  }
+  // append to the target first: a failure mid-move duplicates, never loses —
+  // but only if we abort here on failure, otherwise the source removal below
+  // would still run and delete the only copy of the task
+  if (!(await saveFile(target, file => { Core.appendRaw(file, block); }))) {
+    target.version = null;   // force scanTick to re-read from disk, discarding the phantom in-memory append
+    toast('Move failed — nothing changed');
+    return;
+  }
+  await saveFile(source, file => {
+    const i = file.tasks.findIndex(t => taskKey(t) === key);
+    if (i > -1) Core.removeTaskAt(file, i);
+  });
+  await cleanupSourceImages(source, moved);
+  App.sel = targetTopic + '\t' + block.split('\n', 1)[0];
+  const sx = shareExpr();
+  if (sx && !Core.shareTopicVisible(targetTopic, sx))
+    toast('Moved to ' + targetTopic + '.org — hidden by share filter "' + App.share.active + '"');
+  render();
+}
+
+// --- delete (X) ---
+async function deleteSel() {
+  const r = selRef();
+  if (!r) return;
+  const n = r.parent ? 0 : r.task.children.length;
+  const msg = n
+    ? 'Delete "' + r.task.title + '" and its ' + n + ' sub-task' + (n === 1 ? '' : 's') + '?'
+    : 'Delete "' + r.task.title + '"?';
+  const entry = findEntry(r.topic);
+  if (!entry || entry.parseError || entry.broken) return;
+  if (!confirm(msg)) return;
+  await saveFile(entry, file => {
+    if (r.parent) {
+      const pi = file.tasks.findIndex(t => taskKey(t) === taskKey(r.parent));
+      if (pi === -1) return;
+      const ci = file.tasks[pi].children.findIndex(c => taskKey(c) === taskKey(r.task));
+      if (ci > -1) Core.removeSubtaskAt(file, pi, ci);
+    } else {
+      const i = file.tasks.findIndex(t => taskKey(t) === taskKey(r.task));
+      if (i > -1) Core.removeTaskAt(file, i);
+    }
+  });
+}
+
+// --- quick-add ---
+const qa = $('#quickadd');
+function defaultTopic() { const e = App.files.find(e => !e.broken); return e ? e.topic : null; }
+function hintText(p) {
+  const topic = p.topic || App.lastTopic || defaultTopic() || '?';
+  const sx = shareExpr();
+  const shown = !p.topic && sx && !Core.shareTopicVisible(topic, sx) ? '…' : topic;
+  const parts = ['→ ' + shown + '.org', '“' + p.title + '”'];
+  if (p.priority) parts.push('#' + p.priority);
+  if (p.tags.length) parts.push(':' + p.tags.join(':') + ':');
+  if (p.deadline) parts.push('⏰ ' + p.deadline);
+  if (p.effort) parts.push('~' + p.effort);
+  return parts.join('  ');
+}
+qa.addEventListener('input', () => {
+  $('#hint').textContent = qa.value.trim() ? hintText(Core.parseQuickAdd(qa.value, todayIso())) : '';
+});
+qa.addEventListener('keydown', async e => {
+  e.stopPropagation();
+  if (e.key === 'Escape') { qa.value = ''; $('#hint').textContent = ''; qa.blur(); return; }
+  if (e.key !== 'Enter') return;
+  const p = Core.parseQuickAdd(qa.value, todayIso());
+  if (!p.title) { toast('Task needs a title'); return; }
+  const topic = p.topic || App.lastTopic || defaultTopic();
+  if (!topic) { toast('No topic yet — type "topic: title"'); return; }
+  let entry = findEntry(topic);
+  if (!entry) {
+    if (!confirm('Create new topic file "' + topic + '.org"?')) return;
+    try { entry = await createTopic(topic); } catch (err) { toast('Could not create ' + topic + '.org: ' + err.message); return; }
+    if (!entry) return;
+  }
+  const newTask = Core.makeTask(p, todayIso());
+  // select the new task: render() (inside saveFile) resolves App.sel by key
+  App.sel = topic + '\t' + taskKey(newTask);
+  await saveFile(entry, file => { Core.addTask(file, null, newTask); });
+  App.lastTopic = topic;
+  localStorage.setItem('lastTopic', topic);
+  qa.value = '';
+  qa.blur();   // hand focus to the list so shortcuts (e, N, …) act on the new task
+  const sx = shareExpr();
+  const hidden = sx && !Core.matchesShare(topic, newTask, null, sx);
+  $('#hint').textContent = hidden ? 'saved — hidden by share filter "' + App.share.active + '"' : '';
+});
+
+// --- files panel ---
+function openPanel() {
+  if (App.sharePanel.open) closeSharePanel();
+  App.panel.open = true; App.panel.mode = 'list'; App.panel.idx = 0;
+  renderPanel();
+}
+function closePanel() {
+  App.panel.open = false;
+  $('#files-panel').hidden = true;
+}
+function panelFiles() {
+  const sx = shareExpr();
+  return sx ? App.files.filter(e => Core.shareTopicVisible(e.topic, sx)) : App.files;
+}
+function panelItemCount() {
+  return App.panel.mode === 'pick' ? App.panel.names.length : panelFiles().length;
+}
+function renderPanel() {
+  const p = App.panel;
+  $('#files-panel').hidden = !p.open;
+  if (!p.open) return;
+  const box = $('#files-list');
+  if (p.mode === 'pick') {
+    box.replaceChildren(...p.names.map((name, i) => {
+      const row = div('frow' + (i === p.idx ? ' sel' : ''));
+      const taken = !!findEntry(name.slice(0, -4));
+      if (taken) row.classList.add('muted');
+      row.textContent = taken ? '·   ' + name + ' — already connected'
+                              : (p.checked.has(name) ? '[x] ' : '[ ] ') + name;
+      return row;
+    }));
+    $('#files-hint').textContent = 'space toggle · Enter connect checked · Esc back';
+    return;
+  }
+  if (p.mode === 'new') {
+    const inp = document.createElement('input');
+    inp.placeholder = 'new topic name — Enter, then choose its folder';
+    box.replaceChildren(inp);
+    $('#files-hint').textContent = 'Enter continue · Esc back';
+    inp.focus();
+    inp.onkeydown = async ev => {
+      ev.stopPropagation();
+      if (ev.key === 'Escape') { p.mode = 'list'; renderPanel(); return; }
+      if (ev.key !== 'Enter') return;
+      const topic = inp.value.trim().toLowerCase();
+      if (!/^[\w-]+$/.test(topic)) { toast('Topic names are letters, digits, - and _'); return; }
+      if (findEntry(topic)) { toast('Topic "' + topic + '" already connected'); return; }
+      if (!FSA_OK) { toast('New local files need Chrome or Edge on desktop'); return; }
+      try {
+        const dir = await showDirectoryPicker({ mode: 'readwrite' });
+        await createTopicInBackend(fsaBackend(dir), topic);
+        p.mode = 'list'; p.idx = 0;
+        render(); renderPanel();
+        toast(topic + '.org created and connected');
+      } catch { /* user cancelled the picker */ }
+    };
+    return;
+  }
+  // list mode
+  const pf = panelFiles();
+  p.idx = Math.max(0, Math.min(p.idx, pf.length - 1));
+  if (!pf.length) {
+    const row = div('frow muted');
+    row.textContent = FSA_OK ? 'No files connected — press c for a folder or g for Google Drive'
+                             : 'No files connected — press g to connect Google Drive';
+    box.replaceChildren(row);
+  } else {
+    box.replaceChildren(...pf.map((e, i) => {
+      const row = div('frow' + (i === p.idx ? ' sel' : ''));
+      const name = span('fname'); name.textContent = e.name;
+      const src = span('fsrc'); src.textContent = e.backend.label;
+      const st = span('fstatus');
+      st.textContent = e.broken ? 'unreadable' : e.parseError ? 'parse error'
+                     : e.file ? e.file.tasks.length + ' tasks' : '…';
+      const btn = document.createElement('button');
+      btn.className = 'chip'; btn.textContent = 'disconnect';
+      btn.onclick = () => disconnectAt(App.files.indexOf(e));
+      row.append(name, src, st, btn);
+      return row;
+    }));
+  }
+  $('#files-hint').textContent = (FSA_OK ? 'j/k move · x disconnect · c folder · g Drive · n new file · Esc close'
+                                         : 'j/k move · x disconnect · g Drive · Esc close');
+}
+async function disconnectAt(i) {
+  const e = App.files[i];
+  if (!e) return;
+  App.files.splice(i, 1);
+  App.panel.idx = Math.max(0, Math.min(App.panel.idx, panelFiles().length - 1));
+  await persistFiles();
+  toast('Disconnected ' + e.name + ' — file kept on disk');
+  render(); renderPanel();
+}
+async function startPick() {
+  if (!FSA_OK) { toast('Local folders need Chrome or Edge on desktop'); return; }
+  try {
+    const dir = await showDirectoryPicker({ mode: 'readwrite' });
+    const backend = fsaBackend(dir);
+    let names = (await backend.list()).map(x => x.name);
+    const sx = shareExpr();
+    if (sx) names = names.filter(n => Core.shareTopicVisible(n.slice(0, -4), sx));
+    if (!names.length) { toast('No .org files in that folder'); return; }
+    App.panel.backend = backend;
+    App.panel.names = names;
+    App.panel.checked = new Set(names.filter(n => !findEntry(n.slice(0, -4))));
+    App.panel.mode = 'pick'; App.panel.idx = 0;
+    renderPanel();
+  } catch { /* user cancelled the picker */ }
+}
+async function confirmPick() {
+  const added = await connectEntries(App.panel.backend, [...App.panel.checked]);
+  App.panel.mode = 'list'; App.panel.idx = 0;
+  renderPanel();
+  toast(added + ' file(s) connected');
+}
+
+// --- share presets panel ---
+function openSharePanel() {
+  if (App.panel.open) closePanel();
+  App.sharePanel.open = true;
+  renderSharePanel();
+}
+function closeSharePanel() {
+  App.sharePanel.open = false;
+  $('#share-panel').hidden = true;
+  render();
+}
+function renderSharePanel() {
+  $('#share-panel').hidden = !App.sharePanel.open;
+  if (!App.sharePanel.open) return;
+  const rows = App.share.presets.map((p, i) => {
+    const row = div('srow');
+    const name = document.createElement('input');
+    name.className = 'sname'; name.value = p.name; name.placeholder = 'name';
+    name.onchange = () => {
+      const v = name.value.trim();
+      if (!v || App.share.presets.some((q, j) => j !== i && q.name === v)) {
+        toast(!v ? 'Name required' : 'Name already used');
+        name.value = p.name; return;
+      }
+      if (App.share.active === p.name) { App.share.active = v; localStorage.setItem('shareActive', v); }
+      p.name = v; persistSharePresets(); render();
+    };
+    const expr = document.createElement('input');
+    expr.className = 'sexpr'; expr.value = p.expr;
+    expr.placeholder = 'flo and !elena and !volha';
+    const err = span('serr');
+    const showErr = () => { err.textContent = Core.parseShareExpr(expr.value).error || ''; };
+    showErr();
+    expr.oninput = showErr;
+    expr.onchange = () => { p.expr = expr.value; persistSharePresets(); render(); };
+    const del = document.createElement('button');
+    del.className = 'chip'; del.textContent = 'delete';
+    del.onclick = () => {
+      if (App.share.active === p.name) { App.share.active = null; localStorage.removeItem('shareActive'); }
+      App.share.presets.splice(i, 1);
+      persistSharePresets(); renderSharePanel(); render();
+    };
+    row.append(name, expr, err, del);
+    return row;
+  });
+  const add = document.createElement('button');
+  add.className = 'chip'; add.textContent = '+ add preset';
+  add.onclick = () => {
+    let n = App.share.presets.length + 1;
+    while (App.share.presets.some(p => p.name === 'preset-' + n)) n++;
+    App.share.presets.push({ name: 'preset-' + n, expr: '' });
+    persistSharePresets(); renderSharePanel(); render();
+  };
+  $('#share-list').replaceChildren(...rows, add);
+}
+// Container-level so Escape works while a row input is focused (inputs bubble here
+// before the document handler, which ignores INPUT-focused keys anyway).
+$('#share-panel').addEventListener('keydown', e => {
+  e.stopPropagation();
+  if (e.key === 'Escape') closeSharePanel();
+});
+
+// --- keyboard ---
+function moveSel(delta) {
+  if (!App.visible.length) return;
+  let i = App.visible.findIndex(r => refKey(r) === App.sel);
+  // duplicate keys resolve to the first match; selPos disambiguates which copy
+  if (i !== -1 && App.selPos < App.visible.length &&
+      refKey(App.visible[App.selPos]) === App.sel) i = App.selPos;
+  i = Math.max(0, Math.min(App.visible.length - 1, i + delta));
+  App.sel = refKey(App.visible[i]);
+  App.selPos = i;
+  updateSelClass();
+  // first row: scroll fully up, or scrollIntoView leaves it under the sticky header
+  if (i === 0) window.scrollTo(0, 0);
+  else {
+    const el = document.querySelector('.task.sel');
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  }
+}
+function toggleExpand() {
+  if (!App.sel) return;
+  App.expanded.has(App.sel) ? App.expanded.delete(App.sel) : App.expanded.add(App.sel);
+  render();
+}
+function clearFilters() {
+  App.filter = { deadline: null, priority: null, tag: null, topic: null, text: '' };
+  $('#search').value = '';
+  render();
+}
+
+// --- filters ---
+document.querySelectorAll('.flt').forEach(b => b.onclick = () => {
+  const { k, v } = b.dataset;
+  App.filter[k] = App.filter[k] === v ? null : v;
+  render();
+});
+const searchEl = $('#search');
+searchEl.addEventListener('input', () => { App.filter.text = searchEl.value; render(); });
+searchEl.addEventListener('keydown', e => {
+  e.stopPropagation();
+  if (e.key === 'Escape') { searchEl.value = ''; App.filter.text = ''; searchEl.blur(); render(); }
+  if (e.key === 'Enter') searchEl.blur();
+});
+const sortEl = $('#sort');
+sortEl.addEventListener('change', () => { App.sort = sortEl.value; sortEl.blur(); render(); });
+const shareEl = $('#share');
+shareEl.addEventListener('change', () => {
+  const v = shareEl.value;
+  shareEl.blur();
+  if (v === '\u0000edit') { renderShareControl(); openSharePanel(); return; }
+  setShareActive(v || null);
+});
+function renderShareControl() {
+  const opts = [new Option('share: off', '')];
+  for (const p of App.share.presets) opts.push(new Option('share: ' + p.name, p.name));
+  opts.push(new Option('edit presets…', '\u0000edit'));
+  shareEl.replaceChildren(...opts);
+  shareEl.value = activePreset() ? App.share.active : '';
+  const ind = $('#share-ind');
+  ind.onclick = () => shareEl.focus();
+  const sx = shareExpr();
+  ind.hidden = !sx;
+  if (sx) {
+    ind.textContent = sx.error ? '⛊ ' + App.share.active + ' — ' + sx.error + ' — nothing shown'
+                               : '⛊ ' + App.share.active;
+    ind.classList.toggle('err', !!sx.error);
+  } else ind.classList.remove('err');
+}
+function renderFilterState() {
+  document.querySelectorAll('.flt').forEach(b => {
+    const { k, v } = b.dataset;
+    b.classList.toggle('on', App.filter[k] === v);
+  });
+  $('#sort').value = App.sort;
+  const af = [];
+  if (App.filter.tag) af.push('tag:' + App.filter.tag);
+  if (App.filter.topic) af.push('topic:' + App.filter.topic);
+  $('#active-flt').textContent = af.length ? af.join('  ') + '   (Esc clears)' : '';
+  renderShareControl();
+}
+
+// --- inline editor ---
+function inlineEdit(initial, placeholder, onCommit, opts = {}) {
+  const row = document.querySelector('.task.sel');
+  if (!row) return;
+  const box = div('editor');
+  const inp = document.createElement(opts.multiline ? 'textarea' : 'input');
+  inp.value = initial;
+  inp.placeholder = placeholder;
+  if (opts.multiline) inp.rows = Math.max(3, initial.split('\n').length + 1);
+  box.append(inp);
+  row.after(box);
+  inp.focus();
+  // multiline: cursor at end (select-all would make one keystroke wipe the notes)
+  if (opts.multiline) inp.setSelectionRange(inp.value.length, inp.value.length);
+  else inp.select();
+  // Removing a focused element fires blur synchronously mid-removal, so the
+  // Enter branch and the blur handler must share one idempotent close() —
+  // two bare box.remove() calls re-enter and throw before onCommit runs.
+  let closed = false;
+  const close = () => { if (closed) return; closed = true; box.remove(); };
+  inp.onkeydown = async e => {
+    e.stopPropagation();
+    if (e.key === 'Escape') close();
+    if (e.key === 'Enter' && (!opts.multiline || e.metaKey || e.ctrlKey)) {
+      const v = opts.multiline ? inp.value : inp.value.trim();
+      close();
+      await onCommit(v);
+    }
+  };
+  inp.onblur = close;
+}
+
+document.addEventListener('keydown', async e => {
+  const tag = document.activeElement.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'A' || tag === 'SELECT') return;   // inputs and links handle their own keys
+  const k = e.key;
+  if (App.panel.open) {
+    const p = App.panel;
+    if (k === 'Escape') {
+      e.preventDefault();
+      if (p.mode === 'list') closePanel(); else { p.mode = 'list'; p.idx = 0; renderPanel(); }
+      return;
+    }
+    if (k === 'j' || k === 'ArrowDown') { e.preventDefault(); p.idx = Math.min(p.idx + 1, Math.max(0, panelItemCount() - 1)); renderPanel(); return; }
+    if (k === 'k' || k === 'ArrowUp') { e.preventDefault(); p.idx = Math.max(p.idx - 1, 0); renderPanel(); return; }
+    if (p.mode === 'list') {
+      if (k === 'x') { const en = panelFiles()[p.idx]; if (en) disconnectAt(App.files.indexOf(en)); return; }
+      if (k === 'c') { startPick(); return; }
+      if (k === 'g') { connectGDrive(); return; }
+      if (k === 'n') { p.mode = 'new'; renderPanel(); return; }
+    } else if (p.mode === 'pick') {
+      if (k === ' ') {
+        e.preventDefault();
+        const name = p.names[p.idx];
+        if (name && !findEntry(name.slice(0, -4)))
+          p.checked.has(name) ? p.checked.delete(name) : p.checked.add(name);
+        renderPanel(); return;
+      }
+      if (k === 'Enter') { confirmPick(); return; }
+    }
+    return;   // panel swallows all other keys while open
+  }
+  if (App.sharePanel.open) {
+    if (k === 'Escape') closeSharePanel();
+    return;   // panel swallows all other keys while open
+  }
+  if (k === 'F') { e.preventDefault(); openPanel(); return; }
+  if (k === '?') { $('#help').hidden = !$('#help').hidden; return; }
+  if (k === 'Escape') { if (!$('#help').hidden) { $('#help').hidden = true; return; } clearFilters(); return; }
+  if (k === 'a') { e.preventDefault(); qa.focus(); return; }
+  if (k === '/') { e.preventDefault(); const s = $('#search'); if (s) s.focus(); return; }
+  if (k === 'r') {
+    App.sort = SORT_CYCLE[(SORT_CYCLE.indexOf(App.sort) + 1) % SORT_CYCLE.length];
+    render();
+    return;
+  }
+  if (k === 'S') {
+    const names = App.share.presets.map(p => p.name);
+    if (!names.length) { toast('No share presets yet — pick "edit presets…" in the share dropdown'); return; }
+    const i = names.indexOf(App.share.active);   // -1 (off/stale) cycles to the first preset
+    setShareActive(i === names.length - 1 ? null : names[i + 1]);
+    return;
+  }
+  if ((k === 'ArrowUp' || k === 'ArrowDown') && e.altKey) {
+    e.preventDefault();
+    if (App.sort !== 'topic') { toast('Reordering needs topic order'); return; }
+    const r = selRef();
+    if (!r) return;
+    const entry = findEntry(r.topic);
+    const delta = k === 'ArrowUp' ? -1 : 1;
+    await saveFile(entry, file => {
+      if (r.parent) {
+        const p = file.tasks.find(t => taskKey(t) === taskKey(r.parent));
+        if (!p) return;
+        const i = p.children.findIndex(c => taskKey(c) === taskKey(r.task));
+        if (i > -1) Core.moveTask(file, i, i + delta, p);
+      } else {
+        const i = file.tasks.findIndex(t => taskKey(t) === taskKey(r.task));
+        if (i > -1) Core.moveTask(file, i, i + delta);
+      }
+    });
+    return;
+  }
+  if (k === 'j' || k === 'ArrowDown') { e.preventDefault(); moveSel(1); return; }
+  if (k === 'k' || k === 'ArrowUp') { e.preventDefault(); moveSel(-1); return; }
+  if (k === 'Enter' || k === 'o') { toggleExpand(); return; }
+  if (k === 'y' || k === 'Y') {
+    const r = selRef();
+    if (!r) return;
+    const text = k === 'y' ? r.task.title : Core.subtreeText(r.task);
+    try { await navigator.clipboard.writeText(text); toast(k === 'y' ? 'Copied title' : 'Copied org block'); }
+    catch { toast('Copy failed'); }
+    return;
+  }
+  if (k === 'X') return deleteSel();
+  if (k === 'n') return withSel(t => Core.setState(t, t.state === 'NEXT' ? 'TODO' : 'NEXT'));
+  if (k === 'd') return withSel(t => t.repeat
+      ? Core.advanceRepeat(t, 1)
+      : (t.state === 'DONE'
+          ? Core.setState(t, 'TODO')
+          : Core.setState(t, 'DONE', { iso: todayIso(), hm: nowHm() })));
+  if (k === 'D') {
+    const r = selRef();
+    if (r && !r.task.repeat) { toast('Not a repeating task'); return; }
+    return withSel(t => Core.advanceRepeat(t, -1));
+  }
+  if (k === '1') return withSel(t => Core.setPriority(t, 'A'));
+  if (k === '2') return withSel(t => Core.setPriority(t, 'B'));
+  if (k === '3') return withSel(t => Core.setPriority(t, 'C'));
+  if (k === '0') return withSel(t => Core.setPriority(t, null));
+  if (k === '>') return withSel(t => Core.bumpDeadline(t, 1, todayIso()));
+  if (k === '<') return withSel(t => Core.bumpDeadline(t, -1, todayIso()));
+  if (k === 's') {
+    e.preventDefault();   // don't type the triggering key into the editor input
+    const r = selRef();
+    if (r) inlineEdit((r.task.deadline || '') + (r.task.repeat ? ' ' + r.task.repeat : ''),
+        'deadline: 2026-08-01 / fri / tom [+1w] — empty clears', async v => {
+      let s = v.trim(), repeat = null;
+      const rm = s.match(/\s*(\+\d+[dwmy])$/);
+      if (rm) { repeat = rm[1]; s = s.slice(0, rm.index).trim(); }
+      const iso = s ? Core.parseDateToken(s, todayIso()) : null;
+      if (s && !iso) { toast('Unrecognized date: ' + s); return; }
+      if (repeat && !iso) { toast('A repeater needs a date'); return; }
+      await mutateTask(r.topic, keyPath(r), t => Core.setDeadline(t, iso, repeat));
+    });
+    return;
+  }
+  if (k === 't') {
+    e.preventDefault();
+    const r = selRef();
+    if (r) inlineEdit(r.task.tags.join(' '), 'tags separated by spaces — empty clears', async v => {
+      await mutateTask(r.topic, keyPath(r), t => Core.setTags(t, v ? v.split(/[\s:]+/).filter(Boolean) : []));
+    });
+    return;
+  }
+  if (k === 'E') {
+    e.preventDefault();
+    const r = selRef();
+    if (r) inlineEdit(r.task.effort || '', 'estimate: 30m / 2h / 1.5h / 1d — empty clears', async v => {
+      if (v && !/^\d+(\.\d+)?[hmd]$/.test(v)) { toast('Estimate looks like 30m, 2h, 1.5h or 1d'); return; }
+      await mutateTask(r.topic, keyPath(r), t => Core.setEffort(t, v || null));
+    });
+    return;
+  }
+  if (k === 'm') {
+    e.preventDefault();
+    const r = selRef();
+    if (!r) return;
+    if (r.parent) { toast('Sub-tasks move with their parent'); return; }
+    inlineEdit('', 'move to topic — existing name, or a new one (created next to this file)', async v => {
+      const topic = v.trim().toLowerCase();
+      if (!topic) return;
+      if (!/^[\w-]+$/.test(topic)) { toast('Topic names are letters, digits, - and _'); return; }
+      await moveSelTo(topic);
+    });
+    return;
+  }
+  if (k === 'N') {
+    e.preventDefault();   // don't type the triggering key into the editor
+    const r = selRef();
+    if (!r) return;
+    // prefill dedents like the body view; setBody re-indents on save
+    const cur = r.task.body.map(l => l.replace(/^ {0,2}/, '')).join('\n');
+    inlineEdit(cur, 'notes — Cmd/Ctrl+Enter saves, Esc cancels', async v => {
+      const lines = v.split('\n');
+      while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+      if (lines.length) App.expanded.add(App.sel);
+      await mutateTask(r.topic, keyPath(r), t => Core.setBody(t, lines));
+    }, { multiline: true });
+    return;
+  }
+  if (k === 'e') {
+    e.preventDefault();
+    const r = selRef();
+    if (r) {
+      const t = r.task;
+      const cur = [t.title,
+                   t.priority && '#' + t.priority,
+                   ...t.tags.map(x => ':' + x + ':'),
+                   t.deadline && '@' + t.deadline,
+                   t.repeat,
+                   t.effort && '~' + t.effort].filter(Boolean).join(' ');
+      // the edit line is the whole truth for heading-level fields:
+      // deleting "#A" from it removes the priority (WYSIWYG heading edit)
+      inlineEdit(cur, 'title #A :tag: @date ~2h — omitted parts are removed', async v => {
+        const p = Core.parseQuickAdd(v, todayIso());
+        if (!p.title) { toast('Title required'); return; }
+        await mutateTask(r.topic, keyPath(r), x => {
+          Core.setTitle(x, p.title);
+          Core.setPriority(x, p.priority);
+          Core.setTags(x, p.tags);
+          Core.setDeadline(x, p.deadline, p.repeat);
+          Core.setEffort(x, p.effort);
+        });
+      });
+    }
+    return;
+  }
+  if (k === 'A') {
+    e.preventDefault();   // don't type the triggering key into the editor input
+    const r = selRef();
+    if (!r) return;
+    const parentKey = r.parent ? taskKey(r.parent) : taskKey(r.task);
+    inlineEdit('', 'sub-task: title #A :tag: @date ~2h', async v => {
+      const p = Core.parseQuickAdd(v, todayIso());
+      if (!p.title) { toast('Title required'); return; }
+      const entry = findEntry(r.topic);
+      App.expanded.add(r.topic + '\t' + parentKey);
+      await saveFile(entry, file => {
+        const parent = file.tasks.find(t => taskKey(t) === parentKey);
+        if (parent) Core.addTask(file, parent, Core.makeTask(p, todayIso()));
+      });
+    });
+    return;
+  }
+});
+
+// --- images ---
+function slug(s) {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+}
+document.addEventListener('paste', async e => {
+  const tag = document.activeElement.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+  const r = selRef();
+  if (!r) return;
+  const entry = findEntry(r.topic);
+  if (!entry) return;
+  const item = [...e.clipboardData.items].find(i => i.type.startsWith('image/'));
+  if (!item) return;
+  e.preventDefault();
+  try {
+    const blob = item.getAsFile();
+    const ext = (item.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+    const base = slug(r.task.title) || 'img';
+    let name, n = 1;
+    for (;;) {
+      name = base + '-' + n + '.' + ext;
+      if (await entry.backend.imageExists(name)) n++; else break;
+    }
+    await entry.backend.writeImage(name, blob);
+    App.expanded.add(App.sel);
+    await mutateTask(r.topic, keyPath(r), t => Core.appendBody(t, '[[file:images/' + name + ']]'));
+    toast('Image saved: images/' + name);
+  } catch (err) {
+    toast('Image paste failed: ' + err.message);
+  }
+});
+
+boot();
+</script>
+</body>
+</html>
