@@ -14,11 +14,36 @@ File System Access API (`fsaBackend`, desktop Chromium only) and Google Drive vi
 its REST API + GIS OAuth (`gdriveBackend`, works on mobile too). Both coexist —
 `App.files` is a mix. `version` is the backend-neutral change token (FSA mtime |
 Drive revision). To enable Drive, create a Google Cloud OAuth Web client ID
-(scope `drive.file`, your GitHub Pages URL as an authorized JS origin), serve
-the page over HTTPS, then open the Files panel (`F`) and press `g` to paste the
-client ID in — it's kept in `localStorage` (`gdriveClientId`), never in
-`index.html`/git. `G` in the Files panel re-opens that prompt to change or
-clear it. Empty client id = the Drive option stays disabled; FSA is untouched.
+(scope `drive.file`, your GitHub Pages URL as an authorized JS origin), also
+enable the Picker API and create an API key restricted to it, and note the
+project's numeric project number (Cloud Console dashboard — NOT the project
+ID string) for `PickerBuilder.setAppId`, which the Picker docs say is
+*required* for `drive.file` scope: without it, picking a file updates the
+picker's UI but never actually registers the access grant with Drive — found
+this out empirically after the picker appeared to work but `files.list`
+still only ever returned the app's own file. Serve the page over HTTPS, then
+open the Files panel (`F`) and press `g` to paste the client ID, API key,
+and project number in — they're kept in `localStorage` (`gdriveClientId`,
+`gdriveApiKey`, `gdriveAppId`), never in `index.html`/git. `G` in the Files
+panel re-opens that prompt to change or clear them. `gdrivePickerReady()`
+gates every "can we open the picker" check — client id alone
+(`gdriveConfigured()`) is not enough for that flow. Empty client id = the
+Drive option stays disabled; FSA is untouched. `connectGDrive` still finds/creates the app's
+`org-todo` folder by name, but `drive.file` scope only ever grants access to
+files the app created *or* files the user explicitly picked — picking the
+*folder* itself does not cascade to its existing children (verified against
+Google's docs; do not "fix" this by assuming folder-select grants recursive
+access, it doesn't). So connecting also opens `pickDriveFiles`, a Picker with
+multi-select on, letting the user grant access to whichever pre-existing
+files (including ones inside `images/`) they want the app to see.
+`pickDriveFiles` deliberately does NOT call `DocsView.setParent` to jump
+straight into `org-todo` — confirmed empirically that a `setParent`-scoped
+view resolves through the app's own restricted OAuth token and silently
+shows only files the app can already see (i.e. the exact bug this feature
+exists to fix), whereas the unscoped "browse your whole Drive" view isn't
+subject to that restriction. The user has to navigate into `org-todo`
+themselves inside the picker. Re-running `g` re-opens that
+picker so newly added files can be granted the same way.
 
 ## Commands
 
@@ -118,6 +143,10 @@ test. Files that fail to parse render read-only and are never written.
 Same-parent-only drag-and-drop and reordering (no re-parenting), no CRLF
 support, duplicate sibling headings collide. Local folders are Chromium-desktop
 only (File System Access API); mobile uses the Google Drive backend instead.
-Drive uses `drive.file` scope (app sees only files it created), last-write-wins
-per file, and access tokens that need occasional re-consent. Don't "fix" these
-in passing; they're documented trade-offs in the spec.
+Drive uses `drive.file` scope, so files not yet individually picked through
+`pickDriveFiles` (Files panel `g`) stay invisible to the app even though
+they're sitting right in the connected folder — this needs one picker pass
+per pre-existing file (or batch of them), repeated whenever more get added
+outside the app. It's also last-write-wins per file, with access tokens that
+need occasional re-consent. Don't "fix" these in passing; they're documented
+trade-offs in the spec.
