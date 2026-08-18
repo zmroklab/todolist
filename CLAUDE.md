@@ -13,10 +13,12 @@ step, no dependencies, no server. Design spec:
 File System Access API (`fsaBackend`, desktop Chromium only) and Google Drive via
 its REST API + GIS OAuth (`gdriveBackend`, works on mobile too). Both coexist —
 `App.files` is a mix. `version` is the backend-neutral change token (FSA mtime |
-Drive revision). To enable Drive, set `GDRIVE_CLIENT_ID` (a Google Cloud OAuth Web
-client ID, scope `drive.file`, your GitHub Pages URL as an authorized JS origin)
-and serve the page over HTTPS. Empty client id = the Drive option stays disabled;
-FSA is untouched.
+Drive revision). To enable Drive, create a Google Cloud OAuth Web client ID
+(scope `drive.file`, your GitHub Pages URL as an authorized JS origin), serve
+the page over HTTPS, then open the Files panel (`F`) and press `g` to paste the
+client ID in — it's kept in `localStorage` (`gdriveClientId`), never in
+`index.html`/git. `G` in the Files panel re-opens that prompt to change or
+clear it. Empty client id = the Drive option stays disabled; FSA is untouched.
 
 ## Commands
 

@@ -8,17 +8,34 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-const CHROME = process.env.CHROME_BIN || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+function defaultChromePath() {
+  if (process.platform === 'darwin') return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+  if (process.platform === 'win32') {
+    const candidates = [
+      join(process.env['ProgramFiles'] || 'C:\\Program Files', 'Google\\Chrome\\Application\\chrome.exe'),
+      join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Google\\Chrome\\Application\\chrome.exe'),
+      join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe'),
+    ];
+    return candidates.find(existsSync) || candidates[0];
+  }
+  const candidates = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium-browser', '/usr/bin/chromium'];
+  return candidates.find(existsSync) || candidates[0];
+}
+
+const CHROME = process.env.CHROME_BIN || defaultChromePath();
 if (!existsSync(CHROME)) {
   console.log('SKIP: Chrome not found at', CHROME, '(set CHROME_BIN)');
   process.exit(0);
 }
 
-const root = new URL('..', import.meta.url).pathname;
+const root = fileURLToPath(new URL('..', import.meta.url));
 const server = createServer(async (req, res) => {
   try {
-    const body = await readFile(root + (req.url === '/' ? '/index.html' : req.url));
+    const body = await readFile(join(root, req.url === '/' ? 'index.html' : req.url));
     res.setHeader('Content-Type', 'text/html');
     res.end(body);
   } catch { res.statusCode = 404; res.end(); }
@@ -28,7 +45,7 @@ const PORT = server.address().port;
 
 const chrome = spawn(CHROME, [
   '--headless=new', '--remote-debugging-port=0',
-  `--user-data-dir=/tmp/chrome-orgtodo-e2e-${PORT}`, '--no-first-run',
+  `--user-data-dir=${join(tmpdir(), 'chrome-orgtodo-e2e-' + PORT)}`, '--no-first-run',
 ], { stdio: ['ignore', 'ignore', 'pipe'] });
 let cdpUrl = '';
 chrome.stderr.on('data', d => {
