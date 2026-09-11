@@ -64,6 +64,21 @@ tasks/              — user's data folder (chosen via directory picker)
 - Write safety: before writing a file, re-check `lastModified`; if it changed
   since the last read, re-read and re-parse first, then apply the pending edit
   to the fresh parse. Last-write-wins beyond that (single user).
+- Writes are optimistic: the edit is applied to the in-memory parse and
+  rendered at once, then queued per file and flushed off the event loop
+  (immediately for local folders, debounced ~400 ms for remote backends, whose
+  round-trip is what made the UI feel stuck). A queued edit is the mutation
+  closure itself, so the flush can re-read a file that moved underneath it and
+  replay the queue on top — that is where the "apply to the fresh parse" rule
+  above now lives. A replayed edit whose task no longer exists (renamed
+  elsewhere) is dropped with a toast instead of overwriting the rename.
+- The poll skips files with a non-empty queue: their flush does the re-read.
+- A header indicator shows queue state: hidden when everything is written,
+  "saving" while a write is in flight longer than 250 ms, and a red
+  "unsaved (N) — retry" after a failure (click = retry now; automatic retries
+  back off 2/5/15/30 s, and `beforeunload` warns while anything is unsaved).
+- Multi-file moves stay synchronous (`saveFileNow`): the two-phase
+  append-then-remove has to know the first write landed.
 - UI state (cursor position, expanded task, active filters) survives re-parse;
   tasks are identified across reloads by (file, heading text) with positional
   fallback.
@@ -208,7 +223,9 @@ topics. All combinable; active filters apply to radar and backlog alike:
 - Unsupported browser → banner explaining the Chromium requirement.
 - Permission lost/revoked → prominent "re-grant access" button; UI stays
   visible read-only from last parse.
-- Write failure → error toast, in-memory edit retained, retry on next action.
+- Write failure → the edit stays on screen and in the write queue, the header
+  indicator turns red with the unsaved count, and the write retries with
+  backoff (or immediately on click / tab focus / `online`).
 - Unparseable file → read-only rendering with warning, never rewritten.
 
 ## Testing

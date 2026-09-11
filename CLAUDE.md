@@ -144,11 +144,36 @@ test. Files that fail to parse render read-only and are never written.
   States `TODO`/`NEXT`/`DONE`; radar = NEXT + deadline within 7 days.
 - A poll (`scanTick`, 1.5 s local / 5 s when any Drive file is connected — see
   `armPoll`) diffs each entry's `version` token via `entry.backend.stat()` and
-  re-parses changed files. `saveFile()` re-reads the file first if its version
-  drifted on disk, applies the mutation to the fresh parse, writes via
-  `entry.backend.write()`, then re-parses its own output to reset raw/dirty. All
-  I/O goes through `entry.backend` (never raw FSA/fetch); all UI mutations go
-  through `mutateTask(topic, key, fn)`.
+  re-parses changed files. All I/O goes through `entry.backend` (never raw
+  FSA/fetch); all UI mutations go through `mutateTask(topic, key, fn)`.
+- **Writes are optimistic.** `saveFile()` is synchronous: it applies the
+  mutation to `entry.file`, renders, and pushes the *closure* onto
+  `entry.pending`; `flushEntry()` does the I/O later (`flushDelay` = 0 for FSA,
+  400 ms for remote). The flush re-reads the file when its `version` drifted and
+  replays the whole queue on top (`replayPending`) — that is what merges
+  concurrent edits to different tasks of one file, and it only works because
+  queued mutations re-resolve their target by key inside the file they are
+  handed instead of closing over task objects. Keep new mutations shaped that
+  way, and have them `return false` when the target is missing: false means
+  "nothing matched", so nothing is queued, and on replay it means "changed
+  elsewhere" — the edit is dropped with a toast instead of clobbering someone
+  else's rename. After a successful write the entry is re-parsed from its own
+  output, which replaces every task object, so anything queued during the write
+  must be replayed onto the new parse or it silently disappears from the UI.
+  `entry.pending.splice(0, n)` happens only after the write resolves: a throw
+  has to leave the queue intact for the retry (2/5/15/30 s backoff, or
+  `flushAll()` from the `#sync-ind` click, tab focus and `online`).
+  `scanOnce` skips entries with a non-empty queue — re-reading there would drop
+  the optimistic edit that the flush is about to merge properly.
+- `saveFileNow()` is the awaited, durable variant, and the two-phase cross-file
+  move (`moveSelTo`) is the reason it exists: it must know the append landed
+  before removing the source block, so it flushes the queue first and refuses if
+  anything is still unsaved. `createTopicInBackend` and image uploads stay
+  awaited for the same reason — the remote object has to exist first.
+- `render()` defers while an inline editor is open (`renderPending`): the editor
+  is a DOM node inside the list, and rebuilding removes it mid-edit — removal
+  fires `blur`, which closes it without committing. `inlineEdit`'s `close()`
+  runs the deferred render.
 - Task identity across renders: `taskKey(t)` = first line of the heading block;
   `refKey(r)` = `topic + '\t' + taskKey` for top-level tasks, `topic + '\t' +
   parentKey + '\t' + childKey` for sub-tasks. Two identical headings under one

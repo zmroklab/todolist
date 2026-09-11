@@ -1387,11 +1387,15 @@ const drive = await evaljs(`(async () => {
   for (let i = 0; i < 30 && !App.files.some(e => e.topic === 'drive' && e.file); i++) await new Promise(r => setTimeout(r, 50));
   const e = App.files.find(x => x.topic === 'drive');
   const v0 = e.version, title = e.file && e.file.tasks[0] && e.file.tasks[0].title;
-  await mutateTask('drive', [taskKey(e.file.tasks[0])], t => Core.setState(t, 'NEXT'));
+  mutateTask('drive', [taskKey(e.file.tasks[0])], t => Core.setState(t, 'NEXT'));
+  const optimistic = e.file.tasks[0].state;          // on screen before any request
+  const beforeFlush = store.get(fid).content;        // remote writes are debounced
+  await syncIdle();
   const written = store.get(fid).content;
   await backend.writeImage('pic.png', new TextEncoder().encode('BYTES').buffer);
   const imgOk = await backend.imageExists('pic.png');
-  return { listed, title, v0, v1: e.version, written, versionBumped: store.get(fid).version, imgOk,
+  return { listed, title, v0, v1: e.version, written, optimistic, beforeFlush,
+           versionBumped: store.get(fid).version, imgOk,
            label: e.backend.label, kind: e.backend.kind };
 })()`);
 check('Drive backend: list() finds the .org file in the app folder', drive.listed.join() === 'drive.org', JSON.stringify(drive.listed));
@@ -1400,6 +1404,133 @@ check('Drive backend: saveFile round-trips org text back to Drive', /^\* NEXT Fr
 check('Drive backend: version token advances after write', drive.v1 !== drive.v0 && drive.versionBumped === 2, JSON.stringify(drive));
 check('Drive backend: image write + exists via images subfolder', drive.imgOk === true, JSON.stringify(drive));
 check('Drive backend: entry is tagged as a Drive connection', drive.kind === 'gdrive' && drive.label === 'Drive', JSON.stringify(drive));
+check('Drive backend: state flips in memory before the request goes out', drive.optimistic === 'NEXT', JSON.stringify(drive.optimistic));
+check('Drive backend: the write is deferred, not synchronous', drive.beforeFlush === '* TODO From Drive\n', JSON.stringify(drive.beforeFlush));
+
+
+// ---- optimistic writes: UI first, file in the background --------------------
+// The fake local dir is re-fitted with a controllable write: __writeDelay stalls
+// close(), __writeFail makes it throw. Between them they are what a slow or
+// broken Drive feels like, on a backend the test can drive deterministically.
+const optSetup = await evaljs(`(async () => {
+  window.__writeDelay = 0; window.__writeFail = false;
+  const origGFH = __dirA.getFileHandle.bind(__dirA);
+  __dirA.getFileHandle = async (name, opts) => {
+    const h = await origGFH(name, opts);
+    const origCW = h.createWritable.bind(h);
+    h.createWritable = async () => {
+      const w = await origCW();
+      return { write: x => w.write(x), async close() {
+        if (__writeDelay) await new Promise(r => setTimeout(r, __writeDelay));
+        if (__writeFail) throw new Error('fake write failure');
+        await w.close();
+      } };
+    };
+    return h;
+  };
+  const e = findEntry('home');
+  e.handle = null;                       // drop the cached handle so the wrapper is used
+  __files.set('home.org', '* TODO Alpha\\n* TODO Beta\\n');
+  __mtimes.set('home.org', 500);
+  await scanTick();
+  App.sel = 'home\\t* TODO Alpha';
+  render();
+  return { tasks: e.file.tasks.map(t => t.title), sel: !!document.querySelector('.task.sel') };
+})()`);
+check('optimistic setup: known fixture reloaded from the fake dir',
+      optSetup.tasks.join() === 'Alpha,Beta' && optSetup.sel, JSON.stringify(optSetup));
+
+const slow = await evaljs(`(async () => {
+  __writeDelay = 600;
+  const before = __files.get('home.org');
+  mutateTask('home', ['* TODO Alpha'], t => Core.setState(t, 'NEXT'));
+  const domNow = [...document.querySelectorAll('.task.st-NEXT .title')].some(x => /Alpha/.test(x.textContent));
+  const fileNow = __files.get('home.org') === before;
+  const queued = unsavedCount();
+  await new Promise(r => setTimeout(r, 300));
+  const ind = $('#sync-ind').hidden ? null : $('#sync-ind').textContent;
+  const drained = await syncIdle();
+  return { domNow, fileNow, queued, ind, drained,
+           after: __files.get('home.org'), indAfter: $('#sync-ind').hidden };
+})()`);
+check('slow write: the row flips immediately', slow.domNow, JSON.stringify(slow));
+check('slow write: the file is untouched while the UI is already updated', slow.fileNow && slow.queued === 1, JSON.stringify(slow));
+check('slow write: the indicator says it is saving', /saving/.test(slow.ind || ''), JSON.stringify(slow.ind));
+check('slow write: the bytes land once the queue drains',
+      slow.drained && slow.after === '* NEXT Alpha\n* TODO Beta\n', JSON.stringify(slow));
+check('slow write: the indicator goes away when nothing is pending', slow.indAfter === true, JSON.stringify(slow));
+
+// an edit made elsewhere before our flush must survive it, and ours must survive too
+const merge = await evaljs(`(async () => {
+  __writeDelay = 0;
+  mutateTask('home', ['* NEXT Alpha'], t => Core.setPriority(t, 'A'));
+  __files.set('home.org', '* NEXT Alpha\\n* NEXT Beta\\n');   // other tab, same tick
+  __mtimes.set('home.org', 900);
+  const drained = await syncIdle();
+  return { drained, after: __files.get('home.org') };
+})()`);
+check('concurrent edit to another task in the same file is merged, not clobbered',
+      merge.after === '* NEXT [#A] Alpha\n* NEXT Beta\n', JSON.stringify(merge));
+
+// same task edited elsewhere: the queued edit can no longer be placed, and says so
+const renameClash = await evaljs(`(async () => {
+  __writeDelay = 0;
+  const seen = [];
+  const origToast = window.toast;
+  window.toast = m => { seen.push(m); origToast(m); };
+  mutateTask('home', ['* NEXT [#A] Alpha'], t => Core.setState(t, 'DONE'));
+  __files.set('home.org', '* NEXT [#A] Alpha renamed elsewhere\\n* NEXT Beta\\n');
+  __mtimes.set('home.org', 901);
+  const drained = await syncIdle();
+  window.toast = origToast;
+  return { drained, after: __files.get('home.org'), seen, queued: unsavedCount() };
+})()`);
+check('edit to a task renamed elsewhere is dropped, not written over the rename',
+      renameClash.after === '* NEXT [#A] Alpha renamed elsewhere\n* NEXT Beta\n' && renameClash.queued === 0,
+      JSON.stringify(renameClash));
+check('...and it says so instead of vanishing silently',
+      renameClash.seen.some(m => /changed elsewhere/.test(m)), JSON.stringify(renameClash.seen));
+
+const failing = await evaljs(`(async () => {
+  __writeFail = true;
+  const before = __files.get('home.org');
+  const doneBefore = Number($('#done-count').textContent);
+  mutateTask('home', ['* NEXT Beta'], t => Core.setState(t, 'DONE'));
+  await new Promise(r => setTimeout(r, 400));
+  const ind = { cls: $('#sync-ind').className, text: $('#sync-ind').textContent, hidden: $('#sync-ind').hidden };
+  const domDone = Number($('#done-count').textContent) === doneBefore + 1;
+  const untouched = __files.get('home.org') === before;
+  __writeFail = false;
+  $('#sync-ind').click();                       // 'retry' without waiting out the backoff
+  const drained = await syncIdle();
+  return { ind, domDone, untouched, drained, after: __files.get('home.org'), indAfter: $('#sync-ind').hidden };
+})()`);
+check('failed write: the edit stays on screen', failing.domDone && failing.untouched, JSON.stringify(failing));
+check('failed write: the indicator turns into a retry button',
+      failing.ind.cls === 'err' && /unsaved \(1\)/.test(failing.ind.text), JSON.stringify(failing.ind));
+check('failed write: clicking retry writes it after all',
+      failing.drained && /^\* NEXT \[#A\] Alpha renamed elsewhere\n\* DONE Beta/.test(failing.after), JSON.stringify(failing));
+check('failed write: the indicator clears once it lands', failing.indAfter === true, JSON.stringify(failing));
+
+// a background render must not yank an open editor out from under the typing
+await evaljs(`(() => { document.activeElement.blur(); App.sel = 'home\\t* NEXT [#A] Alpha renamed elsewhere'; render(); })()`);
+await key('e', 'KeyE', 'e', 69);
+await sleep(250);
+const editorGuard = await evaljs(`(async () => {
+  const open = !!document.querySelector('.editor input');
+  __files.set('home.org', '* NEXT [#A] Alpha renamed elsewhere\\n* DONE Beta\\n* TODO Gamma\\n');
+  __mtimes.set('home.org', 950);
+  for (let i = 0; i < 20 && !renderPending; i++) { await scanTick(); await new Promise(r => setTimeout(r, 50)); }
+  return { open, stillOpen: !!document.querySelector('.editor input'), deferred: renderPending,
+           rows: document.querySelectorAll('.task').length };
+})()`);
+check('external change while the editor is open does not close it',
+      editorGuard.open && editorGuard.stillOpen && editorGuard.deferred, JSON.stringify(editorGuard));
+await key('Escape', 'Escape', undefined, 27);
+await sleep(250);
+const afterEditor = await evaljs(`({ deferred: renderPending, gamma: [...document.querySelectorAll('.title')].some(e => /Gamma/.test(e.textContent)) })`);
+check('the deferred render catches up when the editor closes',
+      afterEditor.deferred === false && afterEditor.gamma, JSON.stringify(afterEditor));
 
 ws.close();
 chrome.kill();

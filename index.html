@@ -15,6 +15,8 @@ header { position:sticky; top:0; background:var(--bg); border-bottom:1px solid v
 #filterbar { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:6px; }
 #share-ind { background:var(--accent); color:#fff; border-radius:999px; padding:2px 10px; font-size:12px; }
 #share-ind.err { background:#b3261e; }
+#sync-ind { font-size:12px; border-radius:999px; padding:2px 10px; background:#eee; color:var(--muted); }
+#sync-ind.err { background:#b3261e; color:#fff; cursor:pointer; }
 #search { font:inherit; padding:4px 8px; border:1px solid var(--line); border-radius:6px; width:160px; }
 #sort { font:inherit; font-size:11px; padding:2px 4px; border:1px solid var(--line); border-radius:6px; background:none; color:inherit; }
 main { max-width:860px; margin:0 auto; padding:12px 16px 80px; }
@@ -101,6 +103,7 @@ h3 { font-size:13px; color:var(--muted); margin:10px 0 2px; }
     </select>
     <select id="share" title="share filter — S cycles"></select>
     <span id="share-ind" hidden></span>
+    <span id="sync-ind" title="background sync" hidden></span>
     <span id="active-flt"></span>
     <button id="help-btn" title="Help &amp; shortcuts (?)">?</button>
   </div>
@@ -122,6 +125,13 @@ UI edits back as clean org, never touching lines it doesn't understand.</p>
 local folder (desktop Chrome/Edge only) or <kbd>g</kbd> to connect Google Drive.
 Drive syncs one folder across all your devices — including phones, where local
 folders aren't available.</p>
+<p><b>Saving.</b> Edits apply instantly and are written back in the
+background, so a slow connection never blocks a keystroke. An indicator appears
+next to the filters while a write is in flight; if one fails it turns red and
+counts the unsaved edits — click it to retry now, or leave it and it retries on
+its own. If another device changed the same file meanwhile, the change is merged
+into the fresh copy; if it changed the very task you edited, your edit is dropped
+with a note rather than written over theirs.</p>
 <p><b>On the radar</b> = every <code>NEXT</code> task plus anything due within
 7 days. The backlog below is grouped by topic, in file order; the order dropdown (or
 <kbd>r</kbd>) re-sorts it by priority, deadline, or when tasks were added.
@@ -1125,7 +1135,9 @@ function restoreBackend(s) {                          // saved descriptor -> bac
 // --- boot / file connections ---
 function makeEntry(backend, name) {
   return { topic: name.slice(0, -4), name, backend, handle: null,
-           version: 0, text: '', file: null, parseError: false, broken: false };
+           version: 0, text: '', file: null, parseError: false, broken: false,
+           // background write queue (see saveFile): optimistic edits not yet durable
+           pending: [], flushTimer: null, flushing: false, backoff: 0, lastError: null };
 }
 async function persistFiles() {
   await idbSet('files', App.files.map(e => ({ ...e.backend.descriptor(), name: e.name })));
@@ -1209,6 +1221,9 @@ async function scanTick() {
 async function scanOnce() {
   let changed = false;
   for (const entry of App.files) {
+    // a pending write owns this file: flushEntry re-reads and replays on top of
+    // the fresh parse itself, while re-reading here would drop the optimistic edit
+    if (entry.pending.length || entry.flushing) continue;
     try {
       const version = await entry.backend.stat(entry);
       if (entry.broken) { entry.broken = false; changed = true; }
@@ -1232,7 +1247,14 @@ async function scanOnce() {
 const SORT_CYCLE = ['topic', 'priority', 'deadline', 'created-desc', 'created-asc'];
 const SORT_LABELS = { priority: 'by priority', deadline: 'by deadline',
                       'created-desc': 'newest first', 'created-asc': 'oldest first' };
+// An open inline editor is a DOM node inside the list: rebuilding removes it
+// mid-edit, and the removal fires blur, which closes it without committing. So
+// renders triggered from the background (poll, flush) are deferred until the
+// editor is done. User actions all render after closing it.
+let renderPending = false;
 function render() {
+  if (document.querySelector('.editor')) { renderPending = true; return; }
+  renderPending = false;
   const today = todayIso();
   const files = App.files.filter(e => e.file && !e.parseError && !e.broken).map(e => ({ topic: e.topic, file: e.file }));
   const model = Core.buildModel(files, today);
@@ -1407,14 +1429,16 @@ function taskRow(ref, mode) {
       let list = file.tasks, parent = null;
       if (fromParent) {
         parent = file.tasks.find(t => taskKey(t) === fromParent);
-        if (!parent) return;
+        if (!parent) return false;
         list = parent.children;
       }
-      // keys are re-resolved here: saveFile may have re-read the file, so 'from'/'to' task objects can be stale
+      // keys are re-resolved here: the queued mutation can be replayed against a
+      // file that was re-read in the meantime, so 'from'/'to' task objects can be stale
       const fi = list.findIndex(t => taskKey(t) === taskKey(from.task));
       const ti = list.findIndex(t => taskKey(t) === taskKey(to.task));
-      if (fi > -1 && ti > -1) Core.moveTask(file, fi, ti, parent);
-    });
+      if (fi === -1 || ti === -1) return false;
+      Core.moveTask(file, fi, ti, parent);
+    }, from.task.title);
   };
   if (App.expanded.has(row.dataset.rk) && t.body.some(l => l.trim())) row.append(bodyView(ref));
   return row;
@@ -1471,12 +1495,156 @@ function bodyView(ref) {
 }
 
 $('#done-toggle').onclick = () => { $('#done-list').hidden = !$('#done-list').hidden; render(); };
+$('#sync-ind').onclick = () => { if ($('#sync-ind').className === 'err') flushAll(); };
+window.addEventListener('beforeunload', e => {
+  if (!unsavedCount()) return;
+  e.preventDefault();
+  e.returnValue = '';           // some browsers still want this
+});
+// a tab coming back to life is a good moment to retry a write that failed offline
+window.addEventListener('online', flushAll);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) flushAll(); });
 $('#help-btn').onclick = () => { $('#help').hidden = !$('#help').hidden; };
 $('#help-close').onclick = () => { $('#help').hidden = true; };
 
-// --- write-back ---
-async function saveFile(entry, mutateFn) {
-  if (entry.parseError) { toast('Refusing to write ' + entry.topic + '.org — it did not parse'); return; }
+// --- write-back: optimistic on screen, durable in the background -----------
+// saveFile applies the mutation to the in-memory parse and renders right away,
+// then queues the write. Every queued mutation is a closure that re-resolves its
+// target *inside the file it is handed*, never holding task objects — so when the
+// file turns out to have moved under us the flush can re-read it and replay the
+// whole queue on top. That is what keeps concurrent edits to different tasks of
+// one file (other tab, phone, Emacs) from clobbering each other: it used to run
+// synchronously before every write, and now runs on demand inside the flush.
+const SYNC_GRACE_MS = 250;                    // don't flash 'saving' for quick writes
+const RETRY_MS = [2000, 5000, 15000, 30000];  // backoff after a failed write
+// local writes are free and keep the file fresh for other editors; only remote
+// backends are worth batching, and only they are slow enough to feel it
+function flushDelay(entry) { return entry.backend.kind === 'fsa' ? 0 : 400; }
+
+// mutateFn returning false = 'nothing matched', which is never queued or written
+function saveFile(entry, mutateFn, label) {
+  if (entry.parseError) { toast('Refusing to write ' + entry.topic + '.org — it did not parse'); return false; }
+  if (!entry.file) { saveFileNow(entry, mutateFn); return true; }   // never read yet: load, then write
+  if (mutateFn(entry.file) === false) return false;
+  entry.pending.push({ fn: mutateFn, label: label || 'edit' });
+  render();
+  scheduleFlush(entry);
+  renderSync();
+  return true;
+}
+function scheduleFlush(entry, delay) {
+  if (entry.flushTimer) clearTimeout(entry.flushTimer);
+  entry.flushTimer = setTimeout(() => { entry.flushTimer = null; flushEntry(entry); },
+                                delay === undefined ? flushDelay(entry) : delay);
+}
+// Replay queued mutations onto a freshly parsed file. A miss means the task is
+// gone or its heading changed elsewhere: the edit can no longer be applied, so
+// say so and drop it rather than lose it silently.
+function replayPending(entry) {
+  const kept = [];
+  for (const p of entry.pending) {
+    if (p.fn(entry.file) === false) toast('“' + p.label + '” skipped — changed elsewhere');
+    else kept.push(p);
+  }
+  entry.pending = kept;
+}
+async function flushEntry(entry) {
+  if (entry.flushing || !entry.pending.length) return;
+  entry.flushing = true;
+  renderSync();
+  try {
+    while (entry.pending.length) {
+      const version = await entry.backend.stat(entry);
+      if (version !== entry.version) {             // changed elsewhere since we parsed it
+        const rd = await entry.backend.read(entry);
+        entry.version = rd.version; entry.text = rd.text;
+        try {
+          entry.file = Core.parseOrg(entry.text);
+        } catch (err) {                            // broken elsewhere: never write over it
+          const lost = entry.pending.length;
+          entry.parseError = true;
+          entry.pending = [];
+          toast(entry.topic + '.org no longer parses \u2014 ' + lost + ' unsaved edit(s) dropped');
+          render();
+          break;
+        }
+        replayPending(entry);
+        render();
+        if (!entry.pending.length) break;          // every queued edit was stale
+      }
+      const n = entry.pending.length;              // what this write makes durable
+      const out = Core.serializeFile(entry.file);
+      const w = await entry.backend.write(entry, out);
+      entry.pending.splice(0, n);                  // only now: a throw must keep them queued
+      entry.version = w.version; entry.text = out;
+      entry.file = Core.parseOrg(out);             // reset raw/dirty to canonical state
+      // edits made while write() was in flight went into the *old* file object and
+      // are not in `out` — replay them onto the new parse or they vanish on screen
+      if (entry.pending.length) replayPending(entry);
+      render();
+    }
+    entry.backoff = 0; entry.lastError = null;
+  } catch (e) {
+    entry.lastError = e.message;
+    if (e.name === 'NotAllowedError' || e.name === 'SecurityError')
+      banner('File access was lost.', 'Reconnect files', regrantAll);
+    scheduleFlush(entry, RETRY_MS[Math.min(entry.backoff++, RETRY_MS.length - 1)]);
+  } finally {
+    entry.flushing = false;
+    renderSync();
+  }
+}
+function flushAll() {
+  for (const e of App.files) {
+    if (!e.pending.length) continue;
+    if (e.flushTimer) { clearTimeout(e.flushTimer); e.flushTimer = null; }
+    e.backoff = 0;
+    flushEntry(e);
+  }
+}
+function unsavedCount() { return App.files.reduce((n, e) => n + e.pending.length, 0); }
+// resolves once every queue is empty; the e2e test awaits it instead of sleeping
+async function syncIdle(tries = 600) {
+  for (let i = 0; i < tries; i++) {
+    if (!App.files.some(e => e.pending.length || e.flushing)) return true;
+    await new Promise(r => setTimeout(r, 25));
+  }
+  return false;
+}
+// The sync indicator lives in the header, which render() never rebuilds.
+let syncGraceTimer = null, syncBusySince = 0;
+function renderSync() {
+  const el = $('#sync-ind');
+  if (!el) return;
+  const unsaved = unsavedCount();
+  if (!unsaved) {
+    syncBusySince = 0;
+    el.hidden = true; el.className = ''; el.title = 'background sync';
+    return;
+  }
+  if (!syncBusySince) syncBusySince = Date.now();
+  const failed = App.files.find(e => e.pending.length && e.lastError);
+  if (failed) {
+    el.hidden = false; el.className = 'err';
+    el.textContent = '⚠ unsaved (' + unsaved + ') — retry';
+    el.title = failed.name + ': ' + failed.lastError;
+    return;
+  }
+  if (Date.now() - syncBusySince < SYNC_GRACE_MS) {   // too quick to be worth showing
+    if (!syncGraceTimer) syncGraceTimer = setTimeout(() => { syncGraceTimer = null; renderSync(); }, SYNC_GRACE_MS);
+    return;
+  }
+  const busy = App.files.find(e => e.pending.length) || App.files[0];
+  el.hidden = false; el.className = '';
+  el.textContent = '⟳ saving…'; el.title = 'writing to ' + busy.backend.label;
+}
+// Durable variant: awaited, reports success/failure. Multi-file operations (the
+// two-phase move) need to know the write landed before touching the other file.
+async function saveFileNow(entry, mutateFn) {
+  if (entry.parseError) { toast('Refusing to write ' + entry.topic + '.org — it did not parse'); return false; }
+  if (entry.flushTimer) { clearTimeout(entry.flushTimer); entry.flushTimer = null; }
+  if (entry.pending.length) await flushEntry(entry);
+  if (entry.pending.length) { toast('Earlier edits to ' + entry.topic + '.org are still unsaved'); return false; }
   try {
     const version = await entry.backend.stat(entry);
     if (version !== entry.version) {               // changed on disk since we read it
@@ -1484,7 +1652,7 @@ async function saveFile(entry, mutateFn) {
       entry.version = rd.version; entry.text = rd.text;
       entry.file = Core.parseOrg(entry.text);
     }
-    mutateFn(entry.file);
+    if (mutateFn(entry.file) === false) return false;
     const out = Core.serializeFile(entry.file);
     const w = await entry.backend.write(entry, out);
     entry.version = w.version;
@@ -1497,19 +1665,25 @@ async function saveFile(entry, mutateFn) {
   }
 }
 function findEntry(topic) { return App.files.find(e => e.topic === topic) || null; }
-async function mutateTask(topic, path, fn) {
+// Label for the 'changed elsewhere' toast: the heading line without its stars,
+// state and priority.
+function pathLabel(path) {
+  return path[path.length - 1].replace(/^\*+\s+(TODO|NEXT|DONE)?\s*(\[#[A-C]\]\s*)?/, '');
+}
+function mutateTask(topic, path, fn) {
   const entry = findEntry(topic);
-  if (!entry) return;
-  await saveFile(entry, file => {
+  if (!entry) return false;
+  return saveFile(entry, file => {
     let t = file.tasks.find(x => taskKey(x) === path[0]);
     if (t && path.length > 1) t = t.children.find(c => taskKey(c) === path[1]);
-    if (t) fn(t, file);
-  });
+    if (!t) return false;                          // gone/renamed elsewhere: don't queue
+    fn(t, file);
+  }, pathLabel(path));
 }
 function selRef() { return App.visible.find(r => refKey(r) === App.sel) || null; }
-async function withSel(fn) {
+function withSel(fn) {
   const r = selRef();
-  if (r) await mutateTask(r.topic, keyPath(r), fn);
+  if (r) mutateTask(r.topic, keyPath(r), fn);
 }
 async function createTopicInBackend(backend, topic) {
   const name = topic + '.org';
@@ -1603,6 +1777,11 @@ async function moveSelTo(targetTopic) {
   // re-read the source fresh before extracting the block: the in-memory parse
   // can be up to one poll interval stale, and appending a stale block while
   // removing from a freshly re-read file would silently revert an external edit
+  if (source.pending.length) {                 // land queued edits before moving the block
+    if (source.flushTimer) { clearTimeout(source.flushTimer); source.flushTimer = null; }
+    await flushEntry(source);
+    if (source.pending.length) { toast('Earlier edits to ' + r.topic + '.org are still unsaved'); return; }
+  }
   try {
     const version = await source.backend.stat(source);
     if (version !== source.version) {
@@ -1627,12 +1806,12 @@ async function moveSelTo(targetTopic) {
   // append to the target first: a failure mid-move duplicates, never loses —
   // but only if we abort here on failure, otherwise the source removal below
   // would still run and delete the only copy of the task
-  if (!(await saveFile(target, file => { Core.appendRaw(file, block); }))) {
+  if (!(await saveFileNow(target, file => { Core.appendRaw(file, block); }))) {
     target.version = null;   // force scanTick to re-read from disk, discarding the phantom in-memory append
     toast('Move failed — nothing changed');
     return;
   }
-  await saveFile(source, file => {
+  await saveFileNow(source, file => {
     const i = file.tasks.findIndex(t => taskKey(t) === key);
     if (i > -1) Core.removeTaskAt(file, i);
   });
@@ -1655,17 +1834,19 @@ async function deleteSel() {
   const entry = findEntry(r.topic);
   if (!entry || entry.parseError || entry.broken) return;
   if (!confirm(msg)) return;
-  await saveFile(entry, file => {
+  saveFile(entry, file => {
     if (r.parent) {
       const pi = file.tasks.findIndex(t => taskKey(t) === taskKey(r.parent));
-      if (pi === -1) return;
+      if (pi === -1) return false;
       const ci = file.tasks[pi].children.findIndex(c => taskKey(c) === taskKey(r.task));
-      if (ci > -1) Core.removeSubtaskAt(file, pi, ci);
+      if (ci === -1) return false;
+      Core.removeSubtaskAt(file, pi, ci);
     } else {
       const i = file.tasks.findIndex(t => taskKey(t) === taskKey(r.task));
-      if (i > -1) Core.removeTaskAt(file, i);
+      if (i === -1) return false;
+      Core.removeTaskAt(file, i);
     }
-  });
+  }, 'delete ' + r.task.title);
 }
 
 // --- quick-add ---
@@ -1702,7 +1883,7 @@ qa.addEventListener('keydown', async e => {
   const newTask = Core.makeTask(p, todayIso());
   // select the new task: render() (inside saveFile) resolves App.sel by key
   App.sel = topic + '\t' + taskKey(newTask);
-  await saveFile(entry, file => { Core.addTask(file, null, newTask); });
+  saveFile(entry, file => { Core.addTask(file, null, newTask); }, p.title);
   App.lastTopic = topic;
   localStorage.setItem('lastTopic', topic);
   qa.value = '';
@@ -1855,6 +2036,11 @@ function renderPanel() {
 async function disconnectAt(i) {
   const e = App.files[i];
   if (!e) return;
+  if (e.pending.length) {                     // don't drop edits that never landed
+    if (e.flushTimer) { clearTimeout(e.flushTimer); e.flushTimer = null; }
+    await flushEntry(e);
+    if (e.pending.length && !confirm(e.name + ' has ' + e.pending.length + ' unsaved change(s) that could not be written. Disconnect anyway?')) return;
+  }
   App.files.splice(i, 1);
   App.panel.idx = Math.max(0, Math.min(App.panel.idx, panelFiles().length - 1));
   await persistFiles();
@@ -2045,7 +2231,12 @@ function inlineEdit(initial, placeholder, onCommit, opts = {}) {
   // Enter branch and the blur handler must share one idempotent close() —
   // two bare box.remove() calls re-enter and throw before onCommit runs.
   let closed = false;
-  const close = () => { if (closed) return; closed = true; box.remove(); };
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    box.remove();
+    if (renderPending) render();          // a background render waited for this
+  };
   inp.onkeydown = async e => {
     e.stopPropagation();
     if (e.key === 'Escape') close();
@@ -2122,15 +2313,17 @@ document.addEventListener('keydown', async e => {
     if (!r) return;
     const entry = findEntry(r.topic);
     const delta = k === 'ArrowUp' ? -1 : 1;
-    await saveFile(entry, file => {
+    saveFile(entry, file => {
       if (r.parent) {
         const p = file.tasks.find(t => taskKey(t) === taskKey(r.parent));
-        if (!p) return;
+        if (!p) return false;
         const i = p.children.findIndex(c => taskKey(c) === taskKey(r.task));
-        if (i > -1) Core.moveTask(file, i, i + delta, p);
+        if (i === -1) return false;
+        Core.moveTask(file, i, i + delta, p);
       } else {
         const i = file.tasks.findIndex(t => taskKey(t) === taskKey(r.task));
-        if (i > -1) Core.moveTask(file, i, i + delta);
+        if (i === -1) return false;
+        Core.moveTask(file, i, i + delta);
       }
     });
     return;
@@ -2260,10 +2453,11 @@ document.addEventListener('keydown', async e => {
       if (!p.title) { toast('Title required'); return; }
       const entry = findEntry(r.topic);
       App.expanded.add(r.topic + '\t' + parentKey);
-      await saveFile(entry, file => {
+      saveFile(entry, file => {
         const parent = file.tasks.find(t => taskKey(t) === parentKey);
-        if (parent) Core.addTask(file, parent, Core.makeTask(p, todayIso()));
-      });
+        if (!parent) return false;
+        Core.addTask(file, parent, Core.makeTask(p, todayIso()));
+      }, p.title);
     });
     return;
   }
