@@ -617,12 +617,29 @@ const Core = (() => {
     return out;
   }
 
+  // Which folder do the picked Drive files live in? That parent is the only
+  // trustworthy pointer at the user's real org-todo folder: drive.file can't
+  // see a folder the app didn't create, so a name lookup misses it and
+  // happily creates a second, empty one while the files the user just
+  // granted sit in the first. Only .org picks vote — an image picked out of
+  // images/ has the subfolder as its parent, not the topic folder. Ties go
+  // to the first parent seen, i.e. picker order.
+  function pickedOrgParent(docs) {
+    const byParent = new Map();
+    for (const d of (docs || []))
+      if (d && typeof d.name === 'string' && d.name.endsWith('.org') && d.parentId)
+        byParent.set(d.parentId, (byParent.get(d.parentId) || 0) + 1);
+    let best = null, most = 0;
+    for (const [id, n] of byParent) if (n > most) { best = id; most = n; }
+    return best;
+  }
+
   return { version: 1, dayName, addDays, addInterval, orgActive, orgInactive, parseDateToken, parseOrg,
            renderTask, serializeFile, setState, advanceRepeat, setPriority, setTitle, setTags, setDeadline, bumpDeadline,
            setProp, setEffort, appendBody, setBody, makeTask, moveTask, addTask, parseQuickAdd,
            taskBlock, removeTaskAt, removeSubtaskAt, appendRaw, subtreeText,
            deadlineBucket, buildModel, matchesFilter, matchesFamily, sortBacklog, linkify,
-           parseShareExpr, matchesShare, shareTopicVisible };
+           parseShareExpr, matchesShare, shareTopicVisible, pickedOrgParent };
 })();
 // ===== CORE END =====
 // ===== APP =====
@@ -795,19 +812,23 @@ function fsaBackend(dir) {
   };
 }
 // --- Google Drive backend (works on mobile + desktop; one Drive folder) -----
-// Client ID + API key are entered at runtime (Files panel: 'g') and kept in
-// localStorage — never hardcoded/committed here. Create a Google Cloud OAuth
-// Web client ID (scope drive.file, your GitHub Pages URL as an authorized JS
-// origin) and enable the Picker API + an API key restricted to it.
+// Client ID (and, optionally, an API key) are entered at runtime (Files
+// panel: 'g') and kept in localStorage — never hardcoded/committed here.
+// Create a Google Cloud OAuth Web client ID (scope drive.file, your GitHub
+// Pages URL as an authorized JS origin) and enable the Picker API.
 // drive.file only ever grants the app per-file access to files it created OR
 // files the user explicitly picked via the Picker — picking a *folder* does
 // NOT cascade access to that folder's existing children (confirmed against
 // Google's docs; an earlier version of this comment claimed otherwise and
 // was wrong). So pre-existing files only become visible once the user picks
 // them individually through the Picker — see pickDriveFiles/connectGDrive.
+// Drive tracing: localStorage.orgTodoDebug = '1' (or ?debug in the URL), then
+// reload. Off by default; driveDebug() below works either way.
+const DRIVE_DBG = localStorage.getItem('orgTodoDebug') === '1' || /[?&]debug\b/.test(location.search);
+function dlog(...a) { if (DRIVE_DBG) console.log('%c[drive]', 'color:#3a9', ...a); }
 let gdriveClientId = localStorage.getItem('gdriveClientId') || '';
 let gdriveApiKey = localStorage.getItem('gdriveApiKey') || '';
-let gdriveAppId = localStorage.getItem('gdriveAppId') || '';
+localStorage.removeItem('gdriveAppId');   // used to be asked for; now derived from the client ID
 const GDRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const GDRIVE_FOLDER = 'org-todo';
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
@@ -815,7 +836,11 @@ const DRIVE_UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
 const qEsc = s => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 function gdriveConfigured() { return !!gdriveClientId; }
-function gdrivePickerReady() { return gdriveConfigured() && !!gdriveApiKey && !!gdriveAppId; }
+// The Picker's setAppId wants the Cloud project number, which is exactly the
+// numeric prefix of an OAuth client ID from the same project — so it's read
+// off the client ID instead of being a separate thing to paste in.
+function gdriveAppId() { const m = /^(\d+)-/.exec(gdriveClientId); return m ? m[1] : ''; }
+function gdrivePickerReady() { return gdriveConfigured() && !!gdriveAppId(); }
 function setGdriveClientId(id) {
   gdriveClientId = id.trim();
   if (gdriveClientId) localStorage.setItem('gdriveClientId', gdriveClientId);
@@ -826,11 +851,6 @@ function setGdriveApiKey(key) {
   gdriveApiKey = key.trim();
   if (gdriveApiKey) localStorage.setItem('gdriveApiKey', gdriveApiKey);
   else localStorage.removeItem('gdriveApiKey');
-}
-function setGdriveAppId(id) {
-  gdriveAppId = id.trim();
-  if (gdriveAppId) localStorage.setItem('gdriveAppId', gdriveAppId);
-  else localStorage.removeItem('gdriveAppId');
 }
 
 // Google Identity Services token client. Access tokens live ~1h in memory and
@@ -876,6 +896,7 @@ async function driveFetch(path, opts = {}, base = DRIVE_API) {
   const send = () => fetch(base + path, { ...opts, headers: { Authorization: 'Bearer ' + token, ...(opts.headers || {}) } });
   let r = await send();
   if (r.status === 401) { gdriveAuth.forget(); token = await gdriveAuth.getToken(true); r = await send(); }
+  dlog((opts.method || 'GET') + ' ' + decodeURIComponent(path).slice(0, 160) + ' -> ' + r.status);
   if (!r.ok) throw new Error('Drive ' + r.status + ': ' + (await r.text()).slice(0, 140));
   return r;
 }
@@ -907,6 +928,7 @@ function gdriveBackend(state) {                     // state: { folderId, images
     async list() {                                  // -> [{ name }]
       const q = `'${state.folderId}' in parents and name contains '.org' and trashed=false`;
       const j = await (await driveFetch(`/files?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=1000`)).json();
+      dlog('list in folder', state.folderId, '->', (j.files || []).map(x => x.name).join(', ') || '(nothing)');
       const out = [];
       for (const f of (j.files || [])) if (f.name.endsWith('.org')) { names.set(f.name, f.id); out.push({ name: f.name }); }
       return out.sort((a, b) => a.name.localeCompare(b.name));
@@ -996,48 +1018,88 @@ function loadPicker() {
 // which is the whole point of pairing drive.file with the Picker. Confirmed
 // empirically: a setParent-scoped view showed only the app-created file even
 // though five more sat right there in the folder.
-// Returns how many items were picked (0 if cancelled) — the actual grant is
-// a side effect of picking, so the caller just re-lists afterwards.
+// Returns the picked docs ([] if cancelled) — the grant itself is a side
+// effect of picking, but each doc's parentId is how the caller learns which
+// folder the user actually keeps their files in.
 async function pickDriveFiles(token) {
   await loadPicker();
   return new Promise(res => {
     const view = new google.picker.DocsView()
       .setIncludeFolders(true)
       .setSelectFolderEnabled(false);   // click = navigate into folders; only files are pickable
-    const picker = new google.picker.PickerBuilder()
+    const builder = new google.picker.PickerBuilder()
       .addView(view)
       .setOAuthToken(token)
-      .setDeveloperKey(gdriveApiKey)
-      .setAppId(gdriveAppId)   // required for drive.file scope — without it, picking a file never actually grants access
+      .setAppId(gdriveAppId())   // required for drive.file scope — without it, picking a file never actually grants access
       .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
       .setTitle('Select existing files to connect (navigate to org-todo; multi-select; browse into images/ too)')
       .setCallback(data => {
-        if (data.action === google.picker.Action.PICKED) res((data.docs || []).length);
-        else if (data.action === google.picker.Action.CANCEL) res(0);
-      })
-      .build();
+        if (data.action === google.picker.Action.PICKED) {
+          for (const d of (data.docs || []))
+            dlog('picked', d.name, '| id', d.id, '| parent', d.parentId, '| mime', d.mimeType);
+          res(data.docs || []);
+        } else if (data.action === google.picker.Action.CANCEL) { dlog('picker cancelled'); res([]); }
+      });
+    // Google's integration guide lists a developer key as a prerequisite,
+    // but the reference doesn't mark setDeveloperKey required the way it
+    // does setAppId — so it's optional here. If a picker ever refuses to
+    // open, paste a Picker-API key in (Files panel: G) and it comes back.
+    if (gdriveApiKey) builder.setDeveloperKey(gdriveApiKey);
+    dlog('opening picker | appId', gdriveAppId() || '(EMPTY — setAppId got nothing)',
+         '| developerKey', gdriveApiKey ? 'set' : 'not set');
+    const picker = builder.build();
     picker.setVisible(true);
   });
 }
-// Connect Drive: find/create the app's org-todo folder, let the user pick
-// any pre-existing files in it to grant access (see pickDriveFiles above),
-// then connect every .org file now visible that isn't already connected.
+// Console helper (call driveDebug() from devtools): dumps the config the
+// picker runs on plus every file/folder this app can actually see, with
+// parents — the fastest way to tell "nothing was granted" apart from
+// "granted, but it sits in a different folder than the one we list".
+async function driveDebug() {
+  const cfg = { clientId: gdriveClientId || '(none)', appId: gdriveAppId() || '(EMPTY)',
+                developerKey: gdriveApiKey ? 'set' : 'not set', scope: GDRIVE_SCOPE };
+  console.log('[drive] config', cfg);
+  const q = 'trashed=false';
+  const j = await (await driveFetch(`/files?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType,parents)&pageSize=200`)).json();
+  const visible = (j.files || []).map(x => ({
+    name: x.name, id: x.id, parents: (x.parents || []).join(','),
+    kind: x.mimeType === FOLDER_MIME ? 'folder' : x.mimeType }));
+  console.log('[drive] files this app can see:', visible.length);
+  console.table(visible);
+  const connected = App.files.map(e => ({ name: e.name, backend: e.backend.kind,
+                                          folderId: e.backend.folderId || '', fileId: e.handle || '' }));
+  console.log('[drive] connected entries:');
+  console.table(connected);
+  return { cfg, visible, connected };
+}
+window.driveDebug = driveDebug;   // explicit: 'typeof driveDebug' is the check for 'did the new build load?'
+// Connect Drive: settle on the folder (picked files' parent > already
+// connected > found by name > freshly created), then connect every .org file
+// now visible in it that isn't already connected.
 async function connectGDrive() {
   if (!gdriveConfigured()) { toast('Google Drive isn’t configured yet — open Files (F) and press g to add your client ID'); return; }
-  if (!gdrivePickerReady()) { toast('Add a Google API key and project number too (Files panel: g) — needed to pick existing files'); return; }
+  if (!gdrivePickerReady()) { toast('That client ID looks wrong — it should start with your Cloud project number (Files panel: g)'); return; }
   const existing = App.files.find(e => e.backend.kind === 'gdrive');
   try {
     const token = await gdriveAuth.getToken(true);
     if (!token) { toast('Google sign-in cancelled'); return; }
-    let folderId = existing ? existing.backend.folderId : null;
+    const docs = await pickDriveFiles(token);
+    let folderId = Core.pickedOrgParent(docs);
+    if (folderId) dlog("using the picked files' folder", folderId);
+    if (!folderId && existing) { folderId = existing.backend.folderId; dlog('reusing connected folder', folderId); }
     if (!folderId) {
       const q = `name='${qEsc(GDRIVE_FOLDER)}' and mimeType='${FOLDER_MIME}' and trashed=false`;
       const j = await (await driveFetch(`/files?q=${encodeURIComponent(q)}&fields=files(id)`)).json();
-      folderId = (j.files && j.files[0]) ? j.files[0].id : await driveCreate({ name: GDRIVE_FOLDER, mimeType: FOLDER_MIME });
+      if (j.files && j.files[0]) { folderId = j.files[0].id; dlog('found an', GDRIVE_FOLDER, 'folder the app can see:', folderId); }
+      else { folderId = await driveCreate({ name: GDRIVE_FOLDER, mimeType: FOLDER_MIME }); dlog('created a fresh', GDRIVE_FOLDER, 'folder', folderId); }
     }
-    const backend = existing ? existing.backend : gdriveBackend({ folderId });
-    const picked = await pickDriveFiles(token);
+    // Same folder as the existing connection? share its backend (and its name
+    // cache). A different one just gets its own; entries keep their own
+    // folderId in the descriptor, so both survive a reload.
+    const backend = (existing && existing.backend.folderId === folderId) ? existing.backend : gdriveBackend({ folderId });
+    const picked = docs.length;
     const names = (await backend.list()).map(x => x.name).filter(n => !findEntry(n.slice(0, -4)));
+    dlog('new .org names to connect:', names.join(', ') || '(none)');
     if (!names.length && !picked && !App.files.some(e => e.backend === backend)) {
       await createTopicInBackend(backend, 'inbox');   // nothing there yet: seed one file
       toast('Google Drive connected — created inbox.org');
@@ -1106,7 +1168,8 @@ async function connectEntries(backend, names) {
     hideBanner();
     await start();
   }
-  return added;
+  refreshPanelList();   // outside the guard: added === 0 still means the panel
+  return added;         // may be showing a list from before this connect
 }
 let scanning = false;
 let pollTimer = null;
@@ -1456,6 +1519,7 @@ async function createTopicInBackend(backend, topic) {
   App.files.sort((a, b) => a.topic.localeCompare(b.topic));
   await persistFiles();
   hideBanner();
+  refreshPanelList();
   armPoll();
   return entry;
 }
@@ -1655,6 +1719,12 @@ function closePanel() {
   App.panel.open = false;
   $('#files-panel').hidden = true;
 }
+// render() leaves the files panel alone, so anything that adds to App.files
+// while it's open has to say so. Input modes (pick/new/gdrive-setup) are
+// mid-edit and re-render themselves — don't yank the box out from under them.
+function refreshPanelList() {
+  if (App.panel.open && App.panel.mode === 'list') renderPanel();
+}
 function panelFiles() {
   const sx = shareExpr();
   return sx ? App.files.filter(e => Core.shareTopicVisible(e.topic, sx)) : App.files;
@@ -1708,12 +1778,9 @@ function renderPanel() {
     idInp.placeholder = 'Google OAuth Web client ID — e.g. 1234-abc.apps.googleusercontent.com';
     idInp.value = gdriveClientId;
     const keyInp = document.createElement('input');
-    keyInp.placeholder = 'Google API key (for picking existing files — restrict it to the Picker API)';
+    keyInp.placeholder = 'Google API key — optional, leave empty unless the picker complains';
     keyInp.value = gdriveApiKey;
-    const appInp = document.createElement('input');
-    appInp.placeholder = 'Cloud project number (Cloud Console dashboard — required for the picker to grant access)';
-    appInp.value = gdriveAppId;
-    box.replaceChildren(idInp, keyInp, appInp);
+    box.replaceChildren(idInp, keyInp);
     $('#files-hint').textContent = 'Tab between fields · Enter save & connect · Esc back';
     idInp.focus();
     const submit = async ev => {
@@ -1724,14 +1791,12 @@ function renderPanel() {
       if (!id) { toast('Client ID required'); return; }
       setGdriveClientId(id);
       setGdriveApiKey(keyInp.value.trim());
-      setGdriveAppId(appInp.value.trim());
       p.mode = 'list'; p.idx = 0;
       renderPanel();
       await connectGDrive();
     };
     idInp.onkeydown = submit;
     keyInp.onkeydown = submit;
-    appInp.onkeydown = submit;
     return;
   }
   // list mode

@@ -473,6 +473,23 @@ check('F opens the files panel listing the connected file',
       panelOpen.open && panelOpen.rows === 1 && panelOpen.text.includes('home.org'),
       JSON.stringify(panelOpen));
 
+// --- files connected while the panel is open show up in it ---
+// Regression: connectGDrive connects straight through connectEntries with no
+// checklist, so a Drive connect used to render in the radar while the open
+// panel kept showing the stale list.
+const panelGrew = await evaljs(`(async () => {
+  __filesB.set('live.org', '* TODO Live task\\n');
+  const added = await connectNames(__dirB, ['live.org']);
+  const rows = [...document.querySelectorAll('#files-list .frow')].map(r => r.textContent);
+  const i = App.files.findIndex(e => e.topic === 'live');
+  if (i > -1) { App.files.splice(i, 1); await persistFiles(); render(); renderPanel(); }
+  __filesB.delete('live.org');
+  return { added, rows };
+})()`);
+check('connecting without the checklist refreshes the open files panel',
+      panelGrew.added === 1 && panelGrew.rows.length === 2
+      && panelGrew.rows.some(r => r.includes('live.org')), JSON.stringify(panelGrew));
+
 // --- connect another folder through the checklist ---
 await evaljs(`(window.showDirectoryPicker = async () => __dirB, true)`);
 await key('c', 'KeyC', 'c', 67);

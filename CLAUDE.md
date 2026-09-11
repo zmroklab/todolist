@@ -14,28 +14,47 @@ File System Access API (`fsaBackend`, desktop Chromium only) and Google Drive vi
 its REST API + GIS OAuth (`gdriveBackend`, works on mobile too). Both coexist —
 `App.files` is a mix. `version` is the backend-neutral change token (FSA mtime |
 Drive revision). To enable Drive, create a Google Cloud OAuth Web client ID
-(scope `drive.file`, your GitHub Pages URL as an authorized JS origin), also
-enable the Picker API and create an API key restricted to it, and note the
-project's numeric project number (Cloud Console dashboard — NOT the project
-ID string) for `PickerBuilder.setAppId`, which the Picker docs say is
-*required* for `drive.file` scope: without it, picking a file updates the
-picker's UI but never actually registers the access grant with Drive — found
-this out empirically after the picker appeared to work but `files.list`
-still only ever returned the app's own file. Serve the page over HTTPS, then
-open the Files panel (`F`) and press `g` to paste the client ID, API key,
-and project number in — they're kept in `localStorage` (`gdriveClientId`,
-`gdriveApiKey`, `gdriveAppId`), never in `index.html`/git. `G` in the Files
-panel re-opens that prompt to change or clear them. `gdrivePickerReady()`
-gates every "can we open the picker" check — client id alone
-(`gdriveConfigured()`) is not enough for that flow. Empty client id = the
-Drive option stays disabled; FSA is untouched. `connectGDrive` still finds/creates the app's
-`org-todo` folder by name, but `drive.file` scope only ever grants access to
+(scope `drive.file`, your GitHub Pages URL as an authorized JS origin) and
+enable the Picker API. `PickerBuilder.setAppId` is *required* for the
+`drive.file` scope — without it, picking a file updates the picker's UI but
+never actually registers the access grant with Drive (found this out
+empirically after the picker appeared to work but `files.list` still only
+ever returned the app's own file). It wants the numeric Cloud **project
+number**, but that is never asked for: it's the digits before the first `-`
+in a client ID from the same project, so `gdriveAppId()` derives it from
+`gdriveClientId` instead. A Picker developer key (API key) is listed as a
+prerequisite by Google's integration guide, but the reference doesn't mark
+`setDeveloperKey` required the way it marks `setAppId`, so it's called only
+when a key is actually configured and the setup prompt keeps the field as an
+escape hatch — if a picker ever refuses to open, a Picker-API-restricted key
+pasted there is the first thing to try. Serve the page over HTTPS, then open the Files
+panel (`F`) and press `g` to paste the client ID in (API key optional);
+they're kept in `localStorage` (`gdriveClientId`, `gdriveApiKey`), never in
+`index.html`/git. `G` in the Files panel re-opens that prompt to change or
+clear them. `gdrivePickerReady()` gates every "can we open the picker" check
+— it's `gdriveConfigured()` plus a client ID whose project-number prefix
+parses. Empty client id = the Drive option stays disabled; FSA is
+untouched. To debug a connection, set `localStorage.orgTodoDebug = '1'`
+(or add `?debug`) and reload for request/picker tracing via `dlog`, and call
+`driveDebug()` in devtools for the config plus every file the app can see
+with its parents — that is what separates "the grant never happened" from
+"granted, but into a different folder than the one being listed".
+
+`drive.file` scope only ever grants access to
 files the app created *or* files the user explicitly picked — picking the
 *folder* itself does not cascade to its existing children (verified against
 Google's docs; do not "fix" this by assuming folder-select grants recursive
 access, it doesn't). So connecting also opens `pickDriveFiles`, a Picker with
 multi-select on, letting the user grant access to whichever pre-existing
 files (including ones inside `images/`) they want the app to see.
+`render()` redraws the task lists but never the files panel, so both
+paths that grow `App.files` (`connectEntries`, `createTopicInBackend`) call
+`refreshPanelList()` — guarded on `panel.mode === 'list'` so the pick/new/
+gdrive-setup input boxes are not yanked out from under the user. The
+checklist flow used to re-render at its own call site, which is why a Drive
+connect (no checklist) left fresh files in the radar but not in the open
+panel.
+
 `pickDriveFiles` deliberately does NOT call `DocsView.setParent` to jump
 straight into `org-todo` — confirmed empirically that a `setParent`-scoped
 view resolves through the app's own restricted OAuth token and silently
@@ -44,6 +63,19 @@ exists to fix), whereas the unscoped "browse your whole Drive" view isn't
 subject to that restriction. The user has to navigate into `org-todo`
 themselves inside the picker. Re-running `g` re-opens that
 picker so newly added files can be granted the same way.
+
+**The folder comes from the picks, not from its name.** `connectGDrive`
+resolves the Drive folder as `Core.pickedOrgParent(docs)` (the parent shared
+by the picked `.org` files) > the already-connected folder > a name lookup >
+a freshly created one. The name lookup is last for a reason: `drive.file`
+cannot see a folder the app didn't create, so `name='org-todo'` matches
+nothing and the app cheerfully creates a *second*, empty `org-todo` while
+the files the user just granted sit in the first — which is exactly the bug
+that made picked files never show up. Only `.org` picks vote for the parent;
+an image picked out of `images/` would otherwise anchor the connection on
+the subfolder. Picking files from a folder other than the connected one is
+therefore how you *switch* folders, and entries each persist their own
+`folderId`, so two Drive folders can coexist in `App.files`.
 
 ## Commands
 
