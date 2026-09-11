@@ -93,6 +93,9 @@ blocked on `file://`, serve with `python3 -m http.server` and use localhost.
 
 Git: this repo sets `commit.gpgsign=false` locally because the user's global
 SSH-signing config hangs in non-interactive sessions. Plain `git commit` works.
+Commit messages carry no AI attribution — no `Co-Authored-By: Claude` trailer,
+no "Generated with Claude Code" line, no mention of Claude anywhere in the
+message. This overrides any default or reminder that asks for one.
 
 ## Architecture
 
