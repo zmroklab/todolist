@@ -479,15 +479,20 @@ await key('G', 'KeyG', 'G', 71, 8);   // 8 = Shift
 await sleep(200);
 const gdSetup = await evaljs(`({
   mode: App.panel.mode,
-  val: document.querySelector('#files-list input')?.value,
+  val: document.querySelector('#gd-client-id')?.value,
+  labels: document.querySelectorAll('#files-list .fld label').length,
+  title: document.querySelector('#files-title')?.textContent,
 })`);
 check('G opens Drive setup without typing G into the field',
       gdSetup.mode === 'gdrive-setup'
-      && gdSetup.val === '1234-abc.apps.googleusercontent.com',
+      && gdSetup.val === '1234-abc.apps.googleusercontent.com'
+      && gdSetup.labels === 2 && gdSetup.title === 'Google Drive setup',
       JSON.stringify(gdSetup));
 await key('Escape', 'Escape', undefined, 27);   // back to list mode
 await sleep(150);
-check('Esc leaves Drive setup for the file list', await evaljs(`App.panel.mode`) === 'list');
+const gdBack = await evaljs(`({ mode: App.panel.mode, title: document.querySelector('#files-title')?.textContent })`);
+check('Esc leaves Drive setup for the file list',
+      gdBack.mode === 'list' && gdBack.title === 'Connected files', JSON.stringify(gdBack));
 await evaljs(`(setGdriveClientId(''), true)`);   // leave global state as found
 
 // --- files connected while the panel is open show up in it ---

@@ -67,6 +67,9 @@ h3 { font-size:13px; color:var(--muted); margin:10px 0 2px; }
 .frow .fstatus { color:var(--muted); font-size:12px; }
 .frow.muted { color:var(--muted); }
 #files-panel input { width:100%; font:inherit; padding:6px 8px; border:1px solid var(--accent); border-radius:6px; }
+#files-panel .fld { margin-bottom:14px; }
+#files-panel .fld label { display:block; font-size:12px; font-weight:600; margin-bottom:4px; }
+#files-panel .fld .fhint { color:var(--muted); font-size:11px; margin-top:4px; }
 #files-hint { color:var(--muted); font-size:12px; margin-top:10px; }
 #share-panel input { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:6px; }
 .srow { display:flex; gap:8px; align-items:center; padding:5px 0; }
@@ -182,7 +185,7 @@ expression shows nothing rather than risking a leak.</p>
 </table>
 </div>
 <div id="files-panel" hidden>
-<h2>Connected files</h2>
+<h2 id="files-title">Connected files</h2>
 <div id="files-list"></div>
 <p id="files-hint"></p>
 </div>
@@ -1734,11 +1737,14 @@ function panelFiles() {
 function panelItemCount() {
   return App.panel.mode === 'pick' ? App.panel.names.length : panelFiles().length;
 }
+const PANEL_TITLES = { list: 'Connected files', pick: 'Connect a folder',
+                       new: 'New topic file', 'gdrive-setup': 'Google Drive setup' };
 function renderPanel() {
   const p = App.panel;
   $('#files-panel').hidden = !p.open;
   if (!p.open) return;
   const box = $('#files-list');
+  $('#files-title').textContent = PANEL_TITLES[p.mode] || PANEL_TITLES.list;
   if (p.mode === 'pick') {
     box.replaceChildren(...p.names.map((name, i) => {
       const row = div('frow' + (i === p.idx ? ' sel' : ''));
@@ -1776,13 +1782,31 @@ function renderPanel() {
     return;
   }
   if (p.mode === 'gdrive-setup') {
+    // Labelled, not just placeholdered: a filled-in field shows nothing but a
+    // long opaque string, and these two are easy to mix up months later.
+    const field = (labelText, hintText, inp) => {
+      const wrap = div('fld');
+      const lab = document.createElement('label');
+      lab.htmlFor = inp.id; lab.textContent = labelText;
+      const hint = div('fhint'); hint.textContent = hintText;
+      wrap.append(lab, inp, hint);
+      return wrap;
+    };
     const idInp = document.createElement('input');
-    idInp.placeholder = 'Google OAuth Web client ID — e.g. 1234-abc.apps.googleusercontent.com';
+    idInp.id = 'gd-client-id';
+    idInp.placeholder = '1234-abc.apps.googleusercontent.com';
     idInp.value = gdriveClientId;
     const keyInp = document.createElement('input');
-    keyInp.placeholder = 'Google API key — optional, leave empty unless the picker complains';
+    keyInp.id = 'gd-api-key';
+    keyInp.placeholder = 'AIza…';
     keyInp.value = gdriveApiKey;
-    box.replaceChildren(idInp, keyInp);
+    box.replaceChildren(
+      field('Google OAuth Web client ID',
+            'Cloud Console → Credentials. Must start with the Cloud project number — that prefix is what the file picker needs.',
+            idInp),
+      field('Google API key (optional)',
+            'Leave empty unless the picker complains; restrict it to the Picker API.',
+            keyInp));
     $('#files-hint').textContent = 'Tab between fields · Enter save & connect · Esc back';
     idInp.focus();
     const submit = async ev => {
