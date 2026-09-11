@@ -1717,6 +1717,8 @@ function openPanel() {
 }
 function closePanel() {
   App.panel.open = false;
+  App.panel.mode = 'list';              // no stale sub-mode form left behind
+  $('#files-list').replaceChildren();   // a hidden input can't steal keys if it isn't there
   $('#files-panel').hidden = true;
 }
 // render() leaves the files panel alone, so anything that adds to App.files
@@ -2049,12 +2051,13 @@ document.addEventListener('keydown', async e => {
       if (k === 'x') { const en = panelFiles()[p.idx]; if (en) disconnectAt(App.files.indexOf(en)); return; }
       if (k === 'c') { startPick(); return; }
       if (k === 'g') {
+        e.preventDefault();   // don't type the triggering key into the setup form
         if (gdrivePickerReady()) connectGDrive();
         else { p.mode = 'gdrive-setup'; renderPanel(); }
         return;
       }
-      if (k === 'G') { p.mode = 'gdrive-setup'; renderPanel(); return; }
-      if (k === 'n') { p.mode = 'new'; renderPanel(); return; }
+      if (k === 'G') { e.preventDefault(); p.mode = 'gdrive-setup'; renderPanel(); return; }
+      if (k === 'n') { e.preventDefault(); p.mode = 'new'; renderPanel(); return; }
     } else if (p.mode === 'pick') {
       if (k === ' ') {
         e.preventDefault();

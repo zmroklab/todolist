@@ -473,6 +473,23 @@ check('F opens the files panel listing the connected file',
       panelOpen.open && panelOpen.rows === 1 && panelOpen.text.includes('home.org'),
       JSON.stringify(panelOpen));
 
+// --- G opens the Drive setup form without typing G into the client-ID field ---
+await evaljs(`(setGdriveClientId('1234-abc.apps.googleusercontent.com'), true)`);
+await key('G', 'KeyG', 'G', 71, 8);   // 8 = Shift
+await sleep(200);
+const gdSetup = await evaljs(`({
+  mode: App.panel.mode,
+  val: document.querySelector('#files-list input')?.value,
+})`);
+check('G opens Drive setup without typing G into the field',
+      gdSetup.mode === 'gdrive-setup'
+      && gdSetup.val === '1234-abc.apps.googleusercontent.com',
+      JSON.stringify(gdSetup));
+await key('Escape', 'Escape', undefined, 27);   // back to list mode
+await sleep(150);
+check('Esc leaves Drive setup for the file list', await evaljs(`App.panel.mode`) === 'list');
+await evaljs(`(setGdriveClientId(''), true)`);   // leave global state as found
+
 // --- files connected while the panel is open show up in it ---
 // Regression: connectGDrive connects straight through connectEntries with no
 // checklist, so a Drive connect used to render in the radar while the open
