@@ -1354,7 +1354,7 @@ const drive = await evaljs(`(async () => {
         && (!parent || (f.parents || []).includes(parent))
         && (name == null || f.name === name)
         && (!contains || f.name.endsWith('.org')));
-      return json({ files: files.map(f => ({ id: f.id, name: f.name })) });
+      return json({ files: files.map(f => ({ id: f.id, name: f.name, version: String(f.version), trashed: !!f.trashed })) });
     }
     if (/\\/files$/.test(path) && method === 'POST' && upload === 'multipart') {
       const body = typeof opts.body === 'string' ? opts.body : await opts.body.text();
@@ -1394,9 +1394,39 @@ const drive = await evaljs(`(async () => {
   const written = store.get(fid).content;
   await backend.writeImage('pic.png', new TextEncoder().encode('BYTES').buffer);
   const imgOk = await backend.imageExists('pic.png');
+
+  // A second Drive file must NOT double the poll cost: scanOnce batches a folder
+  // into one files.list instead of one stat per file (that per-file stat is why an
+  // idle tab used to hit Drive about once a second).
+  put({ name: 'drive2.org', parents: [folderId], content: '* TODO Second' + String.fromCharCode(10) });
+  await connectEntries(backend, ['drive2.org']);
+  for (let i = 0; i < 40 && !App.files.some(x => x.topic === 'drive2' && x.file); i++) await new Promise(r => setTimeout(r, 50));
+  await syncIdle();
+  // ...and the batching must survive a reload, where boot() rebuilds a backend per
+  // saved entry: give drive2 its own instance of the same folder, as restoreBackend
+  // used to, and the poll still has to be a single call
+  App.files.find(x => x.topic === 'drive2').backend = gdriveBackend({ folderId });
+  const vAll = await backend.statAll();
+  const statAllOk = vAll.get('drive.org') === String(store.get(fid).version) && vAll.has('drive2.org');
+
+  const realFetch = window.fetch; let calls = 0;
+  window.fetch = (...a) => { calls++; return realFetch(...a); };
+  await scanTick();                       // nothing changed: one list call, no per-file reads
+  const scanCalls = calls;
+  window.fetch = realFetch;
+
+  // a hidden tab spends nothing at all while a remote backend is connected
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+  armPoll();
+  const hiddenTimer = pollTimer;
+  delete document.visibilityState;
+  armPoll();
+  const shownTimer = pollTimer;
+
   return { listed, title, v0, v1: e.version, written, optimistic, beforeFlush,
            versionBumped: store.get(fid).version, imgOk,
-           label: e.backend.label, kind: e.backend.kind };
+           label: e.backend.label, kind: e.backend.kind,
+           statAllOk, scanCalls, hiddenPolls: hiddenTimer !== null, shownPolls: shownTimer !== null };
 })()`);
 check('Drive backend: list() finds the .org file in the app folder', drive.listed.join() === 'drive.org', JSON.stringify(drive.listed));
 check('Drive backend: file read + parsed through connectEntries/scanOnce', drive.title === 'From Drive', JSON.stringify(drive));
@@ -1406,6 +1436,9 @@ check('Drive backend: image write + exists via images subfolder', drive.imgOk ==
 check('Drive backend: entry is tagged as a Drive connection', drive.kind === 'gdrive' && drive.label === 'Drive', JSON.stringify(drive));
 check('Drive backend: state flips in memory before the request goes out', drive.optimistic === 'NEXT', JSON.stringify(drive.optimistic));
 check('Drive backend: the write is deferred, not synchronous', drive.beforeFlush === '* TODO From Drive\n', JSON.stringify(drive.beforeFlush));
+check('Drive backend: statAll reports every file in the folder in one call', drive.statAllOk === true, JSON.stringify(drive));
+check('Drive poll: two connected files cost one request, not two', drive.scanCalls === 1, 'fetches per scanTick: ' + drive.scanCalls);
+check('Drive poll: hidden tab stops polling, showing it resumes', drive.hiddenPolls === false && drive.shownPolls === true, JSON.stringify(drive));
 
 
 // ---- optimistic writes: UI first, file in the background --------------------

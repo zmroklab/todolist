@@ -142,10 +142,32 @@ test. Files that fail to parse render read-only and are never written.
   Sub-task rows render only when their parent is expanded (`App.expanded`,
   also the notes-visibility state; in-memory, collapsed on load).
   States `TODO`/`NEXT`/`DONE`; radar = NEXT + deadline within 7 days.
-- A poll (`scanTick`, 1.5 s local / 5 s when any Drive file is connected — see
-  `armPoll`) diffs each entry's `version` token via `entry.backend.stat()` and
-  re-parses changed files. All I/O goes through `entry.backend` (never raw
-  FSA/fetch); all UI mutations go through `mutateTask(topic, key, fn)`.
+- A poll (`scanTick`) diffs each entry's `version` token and re-parses changed
+  files. All I/O goes through `entry.backend` (never raw FSA/fetch); all UI
+  mutations go through `mutateTask(topic, key, fn)`.
+- **Remote polling is deliberately stingy** — a per-file `stat()` every 5 s is
+  what made an open tab talk to Drive roughly once a second, so three things
+  keep it down and none of them should be "simplified" away:
+  `gdriveBackend.statAll()` answers the whole folder with one `files.list`
+  (`scanOnce` groups entries by `backend.groupKey` — *never* by object
+  identity, since `boot()` used to hand every restored entry its own
+  `gdriveBackend` for the same folder and that silently un-batched the poll on
+  every reload — and falls back to per-entry `stat()` for backends without
+  `statAll`, i.e. FSA; `boot()` now also shares one backend instance per
+  `folderId`, which is what makes the name→id cache work at all); `armPoll`
+  stops polling outright while `document.visibilityState === 'hidden'` and a remote backend
+  is connected, with the `visibilitychange` handler re-arming *and* scanning on
+  the way back; and `remoteCadence()` stretches 5 s → 30 s → 2 min after 2 and
+  10 minutes without activity, reset by `bumpActivity()` (capture-phase
+  `keydown`/`pointerdown`/`paste`, plus any scan that actually found a
+  change). `scanTick` re-calls `armPoll()` every tick because the cadence is
+  time-dependent. Local FSA connections are exempt from all three: disk stats
+  are free, and `ui-e2e.mjs` relies on the flat 1.5 s tick. `read()` also
+  takes the version its caller just learned (`read(entry, knownVersion)`) so a
+  changed file costs one request instead of two.
+  A name missing from `statAll`'s map means "not in this folder any more" →
+  `entry.broken`; a `statAll` that *throws* skips the folder for that tick
+  instead, so one network blip can't blank every file at once.
 - **Writes are optimistic.** `saveFile()` is synchronous: it applies the
   mutation to `entry.file`, renders, and pushes the *closure* onto
   `entry.pending`; `flushEntry()` does the I/O later (`flushDelay` = 0 for FSA,

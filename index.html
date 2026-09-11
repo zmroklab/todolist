@@ -963,9 +963,24 @@ function gdriveBackend(state) {                     // state: { folderId, images
       if (j.trashed) { entry.handle = null; names.delete(entry.name); throw new DOMException('trashed', 'NotFoundError'); }
       return j.version;
     },
-    async read(entry) {                             // -> { text, version }
+    // One list call covers the whole folder, so a poll costs a single request no
+    // matter how many files are connected — per-file stat() is what made an idle
+    // tab talk to Drive once a second. A name missing from the result means gone
+    // from this folder, which scanOnce turns into entry.broken.
+    groupKey: 'gdrive:' + state.folderId,           // entries sharing it poll in one call
+    async statAll() {                               // -> Map(name -> version)
+      const q = `'${state.folderId}' in parents and trashed=false`;
+      const j = await (await driveFetch(`/files?q=${encodeURIComponent(q)}&fields=files(id,name,version)&pageSize=1000`)).json();
+      const out = new Map();
+      for (const f of (j.files || [])) { names.set(f.name, f.id); out.set(f.name, f.version); }
+      return out;
+    },
+    async read(entry, knownVersion) {               // -> { text, version }
       const id = await this.open(entry);
-      const version = (await (await driveFetch(`/files/${id}?fields=version`)).json()).version;
+      // callers normally just learned the version from stat/statAll; asking Drive
+      // for it again costs a whole extra round-trip per read
+      const version = knownVersion !== undefined ? knownVersion
+        : (await (await driveFetch(`/files/${id}?fields=version`)).json()).version;
       const text = await (await driveFetch(`/files/${id}?alt=media`)).text();
       return { text, version };
     },
@@ -1146,7 +1161,15 @@ async function boot() {
   await idbDel('dir').catch(() => {});   // pre-connections folder key, no migration
   const saved = await idbGet('files').catch(() => null);
   if (saved && saved.length) {
-    App.files = saved.map(s => { const b = restoreBackend(s); return b ? makeEntry(b, s.name) : null; }).filter(Boolean);
+    // every entry of one Drive folder must share a backend object: it carries the
+    // name->id cache, and scanOnce batches a folder into a single request
+    const shared = new Map();
+    App.files = saved.map(s => {
+      const key = s.backend === 'gdrive' && s.folderId ? 'gdrive:' + s.folderId : null;
+      let b = key ? shared.get(key) : null;
+      if (!b) { b = restoreBackend(s); if (b && key) shared.set(key, b); }
+      return b ? makeEntry(b, s.name) : null;
+    }).filter(Boolean);
     App.files.sort((a, b) => a.topic.localeCompare(b.topic));
     let granted = true;
     for (const e of App.files) { if (!await e.backend.check()) { granted = false; break; } }
@@ -1189,15 +1212,38 @@ async function connectEntries(backend, names) {
 let scanning = false;
 let pollTimer = null;
 let pollMs = 0;
-// remote backends cost a network round-trip per poll, so slow the cadence when
-// any non-local file is connected; local-only stays snappy at 1.5s
+let lastActivity = dateNow();
+// Remote backends cost a network round-trip per poll, so they get throttled three
+// ways local files don't need: a slower base cadence, a backoff while nobody is
+// touching the page, and no polling at all while the tab is hidden (an open-and-
+// forgotten tab used to poll Drive around the clock). Local folders are free to
+// stat, so they stay flat at 1.5s and keep ticking in the background.
+const REMOTE_POLL_MS = 5000;
+const IDLE_CADENCE = [[10 * 60000, 120000], [2 * 60000, 30000]];   // idle this long -> poll this often
+function remoteCadence() {
+  const idle = dateNow() - lastActivity;
+  for (const [after, ms] of IDLE_CADENCE) if (idle >= after) return ms;
+  return REMOTE_POLL_MS;
+}
 function armPoll() {
-  const want = App.files.some(e => e.backend.kind !== 'fsa') ? 5000 : 1500;
+  const remote = App.files.some(e => e.backend.kind !== 'fsa');
+  if (remote && document.visibilityState === 'hidden') {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; pollMs = 0; }
+    return;                                  // visibilitychange re-arms and scans on the way back
+  }
+  const want = remote ? remoteCadence() : 1500;
   if (pollTimer && pollMs === want) return;
   if (pollTimer) clearInterval(pollTimer);
   pollMs = want;
   pollTimer = setInterval(scanTick, want);
 }
+// Any sign of a live user (or a change found on its own) resets the idle backoff.
+function bumpActivity() {
+  lastActivity = dateNow();
+  if (pollTimer && pollMs > REMOTE_POLL_MS) armPoll();   // straight back to the fast cadence
+}
+for (const ev of ['keydown', 'pointerdown', 'paste'])
+  document.addEventListener(ev, bumpActivity, true);     // capture: never fights the real handlers
 async function start() {
   await scanTick();
   armPoll();
@@ -1214,32 +1260,58 @@ async function scanTick() {
     }
   } finally {
     scanning = false;
+    armPoll();        // cadence is time-dependent now: re-check it every tick (no-op when unchanged)
   }
 }
 
 // --- scanning: poll each connected file's version token, no dir enumeration ---
+// Backends that can report every file's version in one call (Drive: statAll) do,
+// so a folder costs one request per tick instead of one per file; the rest are
+// polled per entry, which is what local files want anyway.
 async function scanOnce() {
   let changed = false;
+  const groups = new Map();                     // groupKey (or the backend itself) -> entries
   for (const entry of App.files) {
     // a pending write owns this file: flushEntry re-reads and replays on top of
     // the fresh parse itself, while re-reading here would drop the optimistic edit
     if (entry.pending.length || entry.flushing) continue;
-    try {
-      const version = await entry.backend.stat(entry);
-      if (entry.broken) { entry.broken = false; changed = true; }
-      if (version !== entry.version) {
-        entry.version = version;
-        entry.text = (await entry.backend.read(entry)).text;
-        try { entry.file = Core.parseOrg(entry.text); entry.parseError = false; }
-        catch (e) { entry.parseError = true; }
-        changed = true;
+    // by groupKey, never by object identity: two backend instances can point at the
+    // same Drive folder, and they must still share one poll
+    const key = entry.backend.groupKey || entry.backend;
+    const g = groups.get(key);
+    if (g) g.push(entry); else groups.set(key, [entry]);
+  }
+  for (const entries of groups.values()) {
+    const backend = entries[0].backend;
+    let versions = null;                        // name -> version, one call for the whole folder
+    if (backend.statAll) {
+      try { versions = await backend.statAll(); }
+      catch (e) {
+        if (e.name === 'NotAllowedError' || e.name === 'SecurityError') throw e;
+        dlog('statAll failed, skipping this tick:', e.message);
+        continue;   // one blip must not flag every file in the folder as broken
       }
-    } catch (e) {
-      if (e.name === 'NotAllowedError' || e.name === 'SecurityError') throw e;
-      entry.handle = null;                      // deleted/renamed on disk: broken, recoverable
-      if (!entry.broken) { entry.broken = true; changed = true; }
+    }
+    for (const entry of entries) {
+      try {
+        const version = versions ? versions.get(entry.name) : await entry.backend.stat(entry);
+        if (version === undefined) throw new DOMException('not in folder', 'NotFoundError');
+        if (entry.broken) { entry.broken = false; changed = true; }
+        if (version !== entry.version) {
+          entry.version = version;
+          entry.text = (await entry.backend.read(entry, version)).text;
+          try { entry.file = Core.parseOrg(entry.text); entry.parseError = false; }
+          catch (e) { entry.parseError = true; }
+          changed = true;
+        }
+      } catch (e) {
+        if (e.name === 'NotAllowedError' || e.name === 'SecurityError') throw e;
+        entry.handle = null;                    // deleted/renamed on disk: broken, recoverable
+        if (!entry.broken) { entry.broken = true; changed = true; }
+      }
     }
   }
+  if (changed) bumpActivity();                  // files are moving: stay on the fast cadence
   return changed;
 }
 
@@ -1503,7 +1575,10 @@ window.addEventListener('beforeunload', e => {
 });
 // a tab coming back to life is a good moment to retry a write that failed offline
 window.addEventListener('online', flushAll);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) flushAll(); });
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) { flushAll(); bumpActivity(); scanTick(); }   // catch up on what changed while away
+  armPoll();                                                          // hidden + remote: stops polling outright
+});
 $('#help-btn').onclick = () => { $('#help').hidden = !$('#help').hidden; };
 $('#help-close').onclick = () => { $('#help').hidden = true; };
 
@@ -1556,7 +1631,7 @@ async function flushEntry(entry) {
     while (entry.pending.length) {
       const version = await entry.backend.stat(entry);
       if (version !== entry.version) {             // changed elsewhere since we parsed it
-        const rd = await entry.backend.read(entry);
+        const rd = await entry.backend.read(entry, version);
         entry.version = rd.version; entry.text = rd.text;
         try {
           entry.file = Core.parseOrg(entry.text);
