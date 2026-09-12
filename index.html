@@ -2399,6 +2399,16 @@ document.addEventListener('keydown', async e => {
     if (k === 'Escape') closeSharePanel();
     return;   // panel swallows all other keys while open
   }
+  const arrow = k === 'ArrowUp' || k === 'ArrowDown';
+  await runCommand(e.altKey && arrow ? 'Alt+' + k : k, e);
+});
+
+// Every global and per-task shortcut, keyed by the key that triggers it (the
+// Alt+arrow reorder as 'Alt+ArrowUp'/'Alt+ArrowDown'). Touch controls call this
+// with the same ids, so a shortcut and its button can never drift apart.
+const NO_EVENT = { key: '', altKey: false, metaKey: false, ctrlKey: false, preventDefault() {} };
+async function runCommand(id, e = NO_EVENT) {
+  const k = id;
   if (k === 'F') { e.preventDefault(); openPanel(); return; }
   if (k === '?') { $('#help').hidden = !$('#help').hidden; return; }
   if (k === 'Escape') { if (!$('#help').hidden) { $('#help').hidden = true; return; } clearFilters(); return; }
@@ -2416,13 +2426,13 @@ document.addEventListener('keydown', async e => {
     setShareActive(i === names.length - 1 ? null : names[i + 1]);
     return;
   }
-  if ((k === 'ArrowUp' || k === 'ArrowDown') && e.altKey) {
+  if (k === 'Alt+ArrowUp' || k === 'Alt+ArrowDown') {
     e.preventDefault();
     if (App.sort !== 'topic') { toast('Reordering needs topic order'); return; }
     const r = selRef();
     if (!r) return;
     const entry = findEntry(r.topic);
-    const delta = k === 'ArrowUp' ? -1 : 1;
+    const delta = k === 'Alt+ArrowUp' ? -1 : 1;
     saveFile(entry, file => {
       if (r.parent) {
         const p = file.tasks.find(t => taskKey(t) === taskKey(r.parent));
@@ -2575,7 +2585,7 @@ document.addEventListener('keydown', async e => {
     });
     return;
   }
-});
+}
 
 // --- images ---
 function slug(s) {

@@ -1579,6 +1579,55 @@ const afterEditor = await evaljs(`({ deferred: renderPending, gamma: [...documen
 check('the deferred render catches up when the editor closes',
       afterEditor.deferred === false && afterEditor.gamma, JSON.stringify(afterEditor));
 
+// ---- command table: every shortcut is callable without a key event ----------
+// Shared by the command and mobile checks below: put home.org into a known
+// state, with no filters, share preset, panels or pending writes in the way.
+async function resetHome(text) {
+  return evaljs(`(async () => {
+    await syncIdle();
+    if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+    if (App.panel.open) closePanel();
+    if (App.sharePanel.open) closeSharePanel();
+    $('#help').hidden = true;
+    document.body.classList.remove('menu-open');
+    setShareActive(null);
+    App.sort = 'topic';
+    App.expanded.clear();
+    clearFilters();
+    __files.set('home.org', ${JSON.stringify(text)});
+    __mtimes.set('home.org', __mtimes.get('home.org') + 1000);
+    const e = findEntry('home');
+    for (let i = 0; i < 40 && !(e.file && Core.serializeFile(e.file) === ${JSON.stringify(text)}); i++) {
+      await scanTick();
+      await new Promise(r => setTimeout(r, 50));
+    }
+    render();
+    return Core.serializeFile(e.file) === ${JSON.stringify(text)};
+  })()`);
+}
+async function selectTitle(title) {
+  return evaljs(`(() => {
+    const i = App.visible.findIndex(r => r.topic === 'home' && r.task.title === ${JSON.stringify(title)});
+    if (i === -1) return false;
+    App.sel = refKey(App.visible[i]); App.selPos = i; updateSelClass();
+    return true;
+  })()`);
+}
+
+check('command table: fixture loads', await resetHome('* TODO Cmd one\n* TODO Cmd two\n'));
+await selectTitle('Cmd one');
+await evaljs(`runCommand('1')`);
+await selectTitle('Cmd one');
+await evaljs(`runCommand('n')`);
+const viaCmd = await evaljs(`(async () => { await syncIdle(); return __files.get('home.org'); })()`);
+check('runCommand applies shortcuts without a key event',
+      viaCmd === '* NEXT [#A] Cmd one\n* TODO Cmd two\n', JSON.stringify(viaCmd));
+await selectTitle('Cmd one');
+await evaljs(`runCommand('Alt+ArrowDown')`);
+const viaAlt = await evaljs(`(async () => { await syncIdle(); return __files.get('home.org'); })()`);
+check('runCommand Alt+ArrowDown moves the selected task down',
+      viaAlt === '* TODO Cmd two\n* NEXT [#A] Cmd one\n', JSON.stringify(viaAlt));
+
 ws.close();
 chrome.kill();
 server.close();
