@@ -1653,6 +1653,15 @@ async function tapEl(expr) {
   return true;
 }
 const titleEl = t => `[...document.querySelectorAll('.task .title')].find(el => el.textContent === ${JSON.stringify(t)})`;
+// tap an exact viewport point, asserting what is there — for "tap on nothing" checks
+async function tapPoint(x, y, expectId) {
+  const hit = await evaljs(`(() => { const h = document.elementFromPoint(${x}, ${y}); return h ? h.id : null; })()`);
+  if (hit !== expectId) { check(`tap point ${x},${y} is #${expectId}`, false, 'would hit #' + hit); return false; }
+  await cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+  await cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await sleep(250);
+  return true;
+}
 
 const deskBar = await evaljs(`getComputedStyle($('#actionbar')).display`);
 check('desktop: the action bar is not shown', deskBar === 'none', deskBar);
@@ -1667,6 +1676,8 @@ const layout = await evaljs(`({ bar: getComputedStyle($('#actionbar')).display,
                                  touch: isTouchUI() })`);
 check('phone: action bar and quick-add shown, isTouchUI true',
       layout.bar === 'flex' && layout.qa !== 'none' && layout.touch === true, JSON.stringify(layout));
+const fonts = await evaljs(`['#quickadd', '#search', '#sort', '#share'].map(s => parseFloat(getComputedStyle($(s)).fontSize))`);
+check('phone: form controls use ≥16px text (iOS zooms the page on smaller)', fonts.every(n => n >= 16), JSON.stringify(fonts));
 
 const noSel = await evaljs(`(() => { App.sel = null; renderActionState();
   const r = [...document.querySelectorAll('#actionbar .tcmd')].every(b => b.disabled);
@@ -1703,7 +1714,7 @@ check('phone sheet: priority A is written and the sheet stays open',
 await tapEl(`$('#more-close')`);
 check('phone sheet: ✕ closes it', await evaljs(`$('#more-sheet').hidden`));
 await tapEl(`$('#more-btn')`);
-await tapEl(`$('#hint')`);   // in the sticky header: never under the sheet
+await tapPoint(5, 4, 'topbar');   // the sticky header's own padding: never under the sheet, not a control
 check('phone sheet: tapping outside closes it without running anything',
       await evaljs(`$('#more-sheet').hidden && !document.querySelector('.editor')`));
 
@@ -1745,6 +1756,8 @@ check('phone attach: an unsupported image type is refused with a toast',
 check('phone editor: fixture loads', await resetHome('* TODO Phone one :errand:\n* TODO Phone two\n'));
 await tapEl(titleEl('Phone one'));
 await tapEl(`$('#actionbar [data-cmd="e"]')`);
+const edFont = await evaljs(`parseFloat(getComputedStyle(document.querySelector('.editor input')).fontSize)`);
+check('phone editor: the editor input uses ≥16px text', edFont >= 16, String(edFont));
 await evaljs(`(() => { document.querySelector('.editor input').value = ''; return true; })()`);
 await cdp('Input.insertText', { text: 'Phone one edited :errand:' });
 await tapEl(`document.querySelector('.editor .ed-save')`);

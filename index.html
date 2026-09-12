@@ -85,10 +85,13 @@ h3 { font-size:13px; color:var(--muted); margin:10px 0 2px; }
 @media (max-width: 720px), (pointer: coarse) {
   body { touch-action:manipulation; }
   input, textarea, select { font-size:16px; }   /* below 16px iOS zooms the page on focus */
+  #quickadd, #search, #sort, .editor input, .editor textarea, #files-panel input, #share-panel input { font-size:16px; }   /* their own rules set a smaller font */
   header { padding:8px 10px; }
   main { padding:8px 8px calc(96px + env(safe-area-inset-bottom)); }
   .task { min-height:44px; padding:8px; }
-  .title { min-width:0; }
+  .title { min-width:60%; }   /* keep titles readable; chips wrap underneath when they don't fit beside */
+  #hint:empty { display:none; }
+  body:not(.menu-open) #filterbar { margin-top:0; }
   .chip { font-size:13px; padding:4px 10px; }
   .touch-only { display:revert; }
   #actionbar { display:flex; position:fixed; left:0; right:0; bottom:0; z-index:5; background:#fff;
@@ -99,14 +102,14 @@ h3 { font-size:13px; color:var(--muted); margin:10px 0 2px; }
   #actionbar button:disabled { opacity:.35; }
   body.typing #actionbar { display:none; }
   #toast { bottom:calc(72px + env(safe-area-inset-bottom)); }
-  #more-sheet { display:block; position:fixed; left:0; right:0; bottom:0; z-index:7; max-height:75vh; overflow:auto;
+  #more-sheet { display:grid; grid-template-columns:1fr 1fr; column-gap:8px; align-content:start; position:fixed; left:0; right:0; bottom:0; z-index:7; max-height:75vh; overflow:auto;
                 background:#fff; border-radius:14px 14px 0 0; box-shadow:0 -8px 30px rgba(0,0,0,.15);
                 padding:8px 12px calc(12px + env(safe-area-inset-bottom)); }
-  #more-sheet .sheet-head { display:flex; justify-content:space-between; align-items:center; padding:4px 4px 8px; }
+  #more-sheet .sheet-head { grid-column:1 / -1; display:flex; justify-content:space-between; align-items:center; padding:4px 4px 8px; }
   #more-sheet .sheet-head button { border:none; background:none; font-size:18px; min-width:44px; min-height:44px; color:var(--muted); }
   #more-sheet > button, #img-btn { display:block; width:100%; text-align:left; min-height:44px; padding:10px 12px;
                                    border:none; border-top:1px solid var(--line); background:none; font:inherit; color:var(--fg); }
-  #more-sheet .sheet-row { display:flex; gap:6px; margin-bottom:6px; }
+  #more-sheet .sheet-row { grid-column:1 / -1; display:flex; gap:6px; margin-bottom:6px; }   /* two-column list below: fits without scrolling */
   #more-sheet .sheet-row button { flex:1 1 0; min-height:44px; border:1px solid var(--line); border-radius:8px; background:#fff; font:inherit; }
   #more-sheet button:disabled { opacity:.35; }
   #more-sheet .danger { color:#b3261e; }
