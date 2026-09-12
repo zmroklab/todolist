@@ -145,6 +145,7 @@ required; tokens fill in the rest, in any order:</p>
 <tr><td><code>#A #B #C</code></td><td>priority</td></tr>
 <tr><td><code>:tag:</code> or <code>:a:b:</code></td><td>tags</td></tr>
 <tr><td><code>@2026-07-22 @jul22 @07-30 @tom @fri</code></td><td>deadline</td></tr>
+<tr><td><code>@14:30 @9:00 @10:00-11:00</code></td><td>time of day (needs a deadline — on its own it means today)</td></tr>
 <tr><td><code>+1w +2d +3m +1y</code></td><td>repeat the deadline every week/day/month/year (needs a deadline)</td></tr>
 <tr><td><code>~30m ~2h ~1.5h ~1d</code></td><td>estimate</td></tr>
 </table>
@@ -184,7 +185,7 @@ expression shows nothing rather than risking a leak.</p>
 <tr><td><kbd>d</kbd></td><td>toggle DONE — or, on a repeating task, advance its deadline one interval</td></tr>
 <tr><td><kbd>D</kbd></td><td>roll a repeating task's deadline back one interval (undo)</td></tr>
 <tr><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>0</kbd></td><td>priority A / B / C / none</td></tr>
-<tr><td><kbd>s</kbd></td><td>set deadline (add <code>+1w</code> etc. to repeat)</td></tr>
+<tr><td><kbd>s</kbd></td><td>set deadline (add <code>14:30</code> for a time, <code>+1w</code> etc. to repeat)</td></tr>
 <tr><td><kbd>&gt;</kbd> / <kbd>&lt;</kbd></td><td>move deadline +1 / −1 day</td></tr>
 <tr><td><kbd>t</kbd></td><td>edit tags</td></tr>
 <tr><td><kbd>E</kbd></td><td>edit estimate</td></tr>

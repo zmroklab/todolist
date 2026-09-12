@@ -142,6 +142,13 @@ test. Files that fail to parse render read-only and are never written.
   Sub-task rows render only when their parent is expanded (`App.expanded`,
   also the notes-visibility state; in-memory, collapsed on load).
   States `TODO`/`NEXT`/`DONE`; radar = NEXT + deadline within 7 days.
+  A deadline may carry an optional time (`t.time`), stored as the verbatim
+  time chunk of the timestamp so an Emacs-written range (`10:00-11:00`)
+  survives an unrelated edit; `Core.timeStart` derives the padded `HH:MM`
+  that sorting and the chip use. `t.deadline` stays date-only on purpose —
+  every bucket, filter, and date calculation depends on that — so times
+  break ties in the radar and backlog sorts but never affect
+  `deadlineBucket`.
 - A poll (`scanTick`) diffs each entry's `version` token and re-parses changed
   files. All I/O goes through `entry.backend` (never raw FSA/fetch); all UI
   mutations go through `mutateTask(topic, key, fn)`.

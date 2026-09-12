@@ -42,7 +42,8 @@ One input, token syntax — only the title is required:
     work: Ship report #A :urgent: @jul22 ~3h
 
 `topic:` file · `#A/#B/#C` priority · `:tag:` tags ·
-`@2026-07-22 | @jul22 | @tomorrow | @fri` deadline · `~3h` estimate.
+`@2026-07-22 | @jul22 | @tomorrow | @fri` deadline · `@14:30` time ·
+`~3h` estimate.
 
 ## Keyboard
 
