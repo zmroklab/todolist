@@ -125,7 +125,8 @@ const setup = await evaljs(`(async () => {
         async getFile() { return new File([imgs.get(name)], name); },
         async createWritable() {
           let buf = '';
-          return { async write(x) { buf += (typeof x === 'string') ? x : new TextDecoder().decode(x); },
+          // a real FileSystemWritableFileStream takes a Blob too (picked photos are Files)
+          return { async write(x) { buf += (typeof x === 'string') ? x : (x instanceof Blob) ? await x.text() : new TextDecoder().decode(x); },
                    async close() { imgs.set(name, buf); } };
         } };
     },
@@ -1684,6 +1685,56 @@ await evaljs(`($('#quickadd').focus(), true)`);
 const typingBar = await evaljs(`getComputedStyle($('#actionbar')).display`);
 await evaljs(`($('#quickadd').blur(), true)`);
 check('phone: the action bar hides while typing', typingBar === 'none', typingBar);
+
+// --- ⋯ sheet ---
+check('phone sheet: fixture loads', await resetHome('* TODO Phone one :errand:\n  a note\n* TODO Phone two\n'));
+await tapEl(titleEl('Phone one'));
+await tapEl(`$('#more-btn')`);
+check('phone sheet: ⋯ opens the sheet', await evaljs(`!$('#more-sheet').hidden`));
+await tapEl(`$('#more-sheet [data-cmd="1"]')`);
+const sheetPri = await evaljs(`(async () => { await syncIdle();
+  return { file: __files.get('home.org'), open: !$('#more-sheet').hidden }; })()`);
+check('phone sheet: priority A is written and the sheet stays open',
+      sheetPri.file.startsWith('* TODO [#A] Phone one :errand:\n') && sheetPri.open, JSON.stringify(sheetPri));
+await tapEl(`$('#more-close')`);
+check('phone sheet: ✕ closes it', await evaljs(`$('#more-sheet').hidden`));
+await tapEl(`$('#more-btn')`);
+await tapEl(titleEl('Phone two'));
+check('phone sheet: tapping outside closes it', await evaljs(`$('#more-sheet').hidden`));
+
+// --- note chip toggles expand ---
+check('phone note chip: fixture loads', await resetHome('* TODO Phone one :errand:\n  a note\n* TODO Phone two\n'));
+await tapEl(`${titleEl('Phone one')}.closest('.task').querySelector('.chip.note')`);
+const noteOpen = await evaljs(`[...document.querySelectorAll('.body')].some(b => b.textContent.includes('a note'))`);
+check('phone note chip: tapping ≡ expands the notes', noteOpen === true);
+
+// --- attach image from the file input ---
+await selectTitle('Phone one');
+const attach = await evaljs(`(async () => {
+  const dt = new DataTransfer();
+  dt.items.add(new File(['PNGBYTES'], 'IMG_0001.png', { type: 'image/png' }));
+  const inp = $('#img-input');
+  inp.files = dt.files;
+  inp.dispatchEvent(new Event('change'));
+  // wait for the link, not the image: the fake dir registers the image name as
+  // soon as the handle is created, before the write and the body edit happen
+  for (let i = 0; i < 40 && !__files.get('home.org').includes('[[file:images/phone-one-1.png]]'); i++)
+    await new Promise(r => setTimeout(r, 50));
+  await syncIdle();
+  return { img: __imagesA.has('phone-one-1.png'), file: __files.get('home.org'), cleared: inp.value === '',
+           toast: $('#toast').textContent };
+})()`);
+check('phone attach: the picked photo is saved to images/ and linked',
+      attach.img && attach.file.includes('[[file:images/phone-one-1.png]]'), JSON.stringify(attach));
+check('phone attach: the input is reset so the same photo can be picked again', attach.cleared === true);
+const heic = await evaljs(`(async () => {
+  const before = __files.get('home.org');
+  await attachImage(new File(['x'], 'a.heic', { type: 'image/heic' }), 'image/heic');
+  await syncIdle();
+  return { same: __files.get('home.org') === before, toast: $('#toast').textContent };
+})()`);
+check('phone attach: an unsupported image type is refused with a toast',
+      heic.same && /Unsupported image type/.test(heic.toast), JSON.stringify(heic));
 
 // ---- mobile teardown
 await cdp('Emulation.setTouchEmulationEnabled', { enabled: false });

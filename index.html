@@ -41,7 +41,7 @@ h3 { font-size:13px; color:var(--muted); margin:10px 0 2px; }
 .chip.dl-week { background:#f59e0b; color:#fff; }
 .chip.on { background:var(--accent); color:#fff; }
 .chip.fold { background:#e5e7eb; font-weight:600; }
-.chip.note { background:transparent; border:1px solid var(--line); color:var(--muted); cursor:default; }
+.chip.note { background:transparent; border:1px solid var(--line); color:var(--muted); cursor:pointer; }
 .body { flex-basis:100%; margin:2px 0 4px 28px; color:#333; }
 .body img { max-width:100%; border:1px solid var(--line); border-radius:6px; display:block; margin:4px 0; }
 .bline { white-space:pre-wrap; font-size:13px; }
@@ -98,6 +98,17 @@ h3 { font-size:13px; color:var(--muted); margin:10px 0 2px; }
   #actionbar button:disabled { opacity:.35; }
   body.typing #actionbar { display:none; }
   #toast { bottom:calc(72px + env(safe-area-inset-bottom)); }
+  #more-sheet { display:block; position:fixed; left:0; right:0; bottom:0; z-index:7; max-height:75vh; overflow:auto;
+                background:#fff; border-radius:14px 14px 0 0; box-shadow:0 -8px 30px rgba(0,0,0,.15);
+                padding:8px 12px calc(12px + env(safe-area-inset-bottom)); }
+  #more-sheet .sheet-head { display:flex; justify-content:space-between; align-items:center; padding:4px 4px 8px; }
+  #more-sheet .sheet-head button { border:none; background:none; font-size:18px; min-width:44px; min-height:44px; color:var(--muted); }
+  #more-sheet > button, #img-btn { display:block; width:100%; text-align:left; min-height:44px; padding:10px 12px;
+                                   border:none; border-top:1px solid var(--line); background:none; font:inherit; color:var(--fg); }
+  #more-sheet .sheet-row { display:flex; gap:6px; margin-bottom:6px; }
+  #more-sheet .sheet-row button { flex:1 1 0; min-height:44px; border:1px solid var(--line); border-radius:8px; background:#fff; font:inherit; }
+  #more-sheet button:disabled { opacity:.35; }
+  #more-sheet .danger { color:#b3261e; }
 }
 [hidden] { display:none !important; }
 </style>
@@ -236,6 +247,34 @@ Example: <code>flo and !elena and !volha</code>. Esc closes.</p>
   <button class="tcmd" data-cmd="N"><span class="ico">≡</span>notes</button>
   <button id="more-btn"><span class="ico">⋯</span>more</button>
 </nav>
+<div id="more-sheet" hidden>
+  <div class="sheet-head"><b>More</b><button id="more-close" title="Close">✕</button></div>
+  <div class="sheet-row">
+    <button class="tcmd keep" data-cmd="1">A</button>
+    <button class="tcmd keep" data-cmd="2">B</button>
+    <button class="tcmd keep" data-cmd="3">C</button>
+    <button class="tcmd keep" data-cmd="0">no priority</button>
+  </div>
+  <div class="sheet-row">
+    <button class="tcmd keep" data-cmd="<">⏰ −1 day</button>
+    <button class="tcmd keep" data-cmd=">">⏰ +1 day</button>
+  </div>
+  <div class="sheet-row">
+    <button class="tcmd keep" data-cmd="Alt+ArrowUp">↑ move up</button>
+    <button class="tcmd keep" data-cmd="Alt+ArrowDown">↓ move down</button>
+  </div>
+  <button class="tcmd" data-cmd="o">▸ expand / collapse</button>
+  <button class="tcmd" data-cmd="A">+ sub-task</button>
+  <button class="tcmd" data-cmd="t">tags</button>
+  <button class="tcmd" data-cmd="E">estimate</button>
+  <button class="tcmd" data-cmd="D">🔁 undo repeat</button>
+  <button class="tcmd" data-cmd="m">move to file…</button>
+  <button class="tcmd" data-cmd="y">copy title</button>
+  <button class="tcmd" data-cmd="Y">copy org block</button>
+  <label id="img-btn" for="img-input">attach image…</label>
+  <button class="tcmd danger" data-cmd="X">delete</button>
+</div>
+<input type="file" id="img-input" accept="image/*" hidden>
 <script>
 // ===== CORE START =====
 const Core = (() => {
@@ -1475,6 +1514,10 @@ function renderLinkified(el, text) {
     }
   }
 }
+function toggleRowExpand(rk) {
+  App.expanded.has(rk) ? App.expanded.delete(rk) : App.expanded.add(rk);
+  render();
+}
 function taskRow(ref, mode) {
   const t = ref.task;
   App.visible.push(ref);
@@ -1522,17 +1565,13 @@ function taskRow(ref, mode) {
   if (t.children.length) {
     const fc = span('chip fold');
     fc.textContent = (App.expanded.has(row.dataset.rk) ? '▾ ' : '▸ ') + t.children.length;
-    fc.onclick = ev => {
-      ev.stopPropagation();
-      const rk = row.dataset.rk;
-      App.expanded.has(rk) ? App.expanded.delete(rk) : App.expanded.add(rk);
-      render();
-    };
+    fc.onclick = ev => { ev.stopPropagation(); toggleRowExpand(row.dataset.rk); };
     meta.append(fc);
   }
   if (t.body.some(l => l.trim())) {
     const nb = span('chip note');
     nb.textContent = '≡';
+    nb.onclick = ev => { ev.stopPropagation(); toggleRowExpand(row.dataset.rk); };
     meta.append(nb);
   }
   row.append(pri, title, meta);
@@ -1655,8 +1694,26 @@ TOUCH_MQ.addEventListener('change', () => render());
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-cmd]');
   if (!b || b.disabled) return;
+  // repeatable entries (priority, ±1 day, move) keep the sheet open; the rest
+  // open an editor or dialog, which the sheet would cover
+  if (b.closest('#more-sheet') && !b.classList.contains('keep')) closeMore();
   runCommand(b.dataset.cmd, NO_EVENT);
 });
+function openMore() { $('#more-sheet').hidden = false; }
+function closeMore() { $('#more-sheet').hidden = true; }
+$('#more-btn').onclick = () => { $('#more-sheet').hidden ? openMore() : closeMore(); };
+$('#more-close').onclick = closeMore;
+// a tap anywhere outside the sheet dismisses it (capture: before the row's own click)
+document.addEventListener('pointerdown', e => {
+  if (!$('#more-sheet').hidden && !e.target.closest('#more-sheet, #more-btn')) closeMore();
+}, true);
+$('#img-btn').addEventListener('click', () => closeMore());
+$('#img-input').onchange = async () => {
+  const inp = $('#img-input');
+  const f = inp.files[0];
+  inp.value = '';   // picking the same photo twice still fires change
+  if (f) await attachImage(f, f.type);
+};
 function renderActionState() {
   const none = !selRef();
   document.querySelectorAll('.tcmd').forEach(b => { b.disabled = none; });
@@ -2640,19 +2697,16 @@ async function runCommand(id, e = NO_EVENT) {
 function slug(s) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
 }
-document.addEventListener('paste', async e => {
-  const tag = document.activeElement.tagName;
-  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+const IMG_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' };
+async function attachImage(blob, mimeType) {
   const r = selRef();
-  if (!r) return;
+  if (!r) { toast('Select a task first'); return; }
   const entry = findEntry(r.topic);
   if (!entry) return;
-  const item = [...e.clipboardData.items].find(i => i.type.startsWith('image/'));
-  if (!item) return;
-  e.preventDefault();
+  const ext = IMG_EXT[mimeType];
+  // anything else wouldn't match IMG_RE, so it would be saved but never shown
+  if (!ext) { toast('Unsupported image type: ' + (mimeType || 'unknown')); return; }
   try {
-    const blob = item.getAsFile();
-    const ext = (item.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
     const base = slug(r.task.title) || 'img';
     let name, n = 1;
     for (;;) {
@@ -2666,6 +2720,15 @@ document.addEventListener('paste', async e => {
   } catch (err) {
     toast('Image paste failed: ' + err.message);
   }
+}
+document.addEventListener('paste', async e => {
+  const tag = document.activeElement.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+  if (!selRef()) return;
+  const item = [...e.clipboardData.items].find(i => i.type.startsWith('image/'));
+  if (!item) return;
+  e.preventDefault();
+  await attachImage(item.getAsFile(), item.type);
 });
 
 boot();
