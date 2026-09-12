@@ -44,7 +44,10 @@ makes range preservation free — an unrelated edit re-emits exactly the
 text that was there. A helper derives the part that logic needs:
 
 - `Core.timeStart(time)` → `"10:00"` for `"10:00-11:00"`, `"14:30"` for
-  `"14:30"`, `null` for `null`. Used by sorting and display.
+  `"14:30"`, `null` for `null`. Used by sorting and display. It also
+  zero-pads the hour, so a file written by hand as `9:00` keeps its
+  verbatim text but sorts and displays as `09:00` — without the padding,
+  `"9:00"` would sort after `"14:30"` as a string.
 
 A time never exists without a date, matching what org can express:
 clearing the deadline clears the time.
@@ -68,12 +71,18 @@ present.
 lenient `[^>]*?` silently eats any time. It gains an explicit time group:
 
 ```js
-/DEADLINE:\s*<(\d{4}-\d{2}-\d{2})(?:\s+[A-Za-z]{2,})?(?:\s+(\d{1,2}:\d{2}(?:-\d{1,2}:\d{2})?))?(?:\s+(\+\d+[dwmy]))?\s*>/
+/DEADLINE:\s*<(\d{4}-\d{2}-\d{2})(?:\s+[A-Za-z]{2,})?(?:\s+(\d{1,2}:\d{2}(?:-\d{1,2}:\d{2})?))?[^>]*?(?:\s+(\+\d+[dwmy]))?>/
 ```
 
 - Group 1 → `t.deadline`, group 2 → `t.time`, group 3 → `t.repeat`.
 - The day name stays optional and is never stored (it is recomputed on
   write, as today).
+- The lenient `[^>]*?` tail **stays**, now positioned after the time
+  group rather than swallowing it. Org timestamps can carry a warning
+  period (`<2026-08-01 Sat +1w -2d>`) that today's regex tolerates by
+  ignoring; a fully strict pattern would fail to match such a line and
+  silently drop its deadline. Anchoring the time immediately after the
+  date and day name captures it without narrowing what the app accepts.
 - A timestamp the regex cannot match at all leaves `t.deadline` null, as
   today — unchanged behaviour for genuinely foreign syntax.
 
