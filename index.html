@@ -11,6 +11,7 @@
 body { margin:0; font:14px/1.45 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
 header { position:sticky; top:0; background:var(--bg); border-bottom:1px solid var(--line); padding:10px 16px; z-index:2; }
 #quickadd { width:100%; font:inherit; padding:8px 10px; border:1px solid var(--line); border-radius:8px; }
+#qa-row { display:flex; gap:8px; }
 #hint { font:12px/1.4 ui-monospace, monospace; color:var(--muted); min-height:16px; margin-top:4px; }
 #filterbar { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:6px; }
 #share-ind { background:var(--accent); color:#fff; border-radius:999px; padding:2px 10px; font-size:12px; }
@@ -112,13 +113,24 @@ h3 { font-size:13px; color:var(--muted); margin:10px 0 2px; }
   .editor .editor-btns { display:flex; gap:8px; margin:6px 0 4px; }
   .editor .editor-btns button { flex:1 1 0; min-height:44px; border-radius:8px; font:inherit; border:1px solid var(--line); background:#fff; }
   .editor .editor-btns .ed-save { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  #qa-row #menu-btn { display:block; position:relative; flex:none; width:44px; border:1px solid var(--line);
+                      border-radius:8px; background:#fff; font-size:20px; color:var(--fg); }
+  #menu-btn.has-filter::after { content:''; position:absolute; top:6px; right:6px; width:8px; height:8px;
+                                border-radius:50%; background:var(--accent); }
+  body:not(.menu-open) #filterbar > :not(#sync-ind):not(#share-ind):not(#active-flt) { display:none; }
+  body.menu-open #search { width:100%; }
+  #help-btn { margin-left:0; width:44px; height:44px; }
+  #active-flt { cursor:pointer; }
 }
 [hidden] { display:none !important; }
 </style>
 </head>
 <body>
 <header id="topbar">
-  <input id="quickadd" placeholder="+ add task…   work: Title #A :tag: @fri ~2h" autocomplete="off">
+  <div id="qa-row">
+    <input id="quickadd" placeholder="+ add task…   work: Title #A :tag: @fri ~2h" autocomplete="off">
+    <button id="menu-btn" title="Search, filters, files, help" aria-label="Menu">☰</button>
+  </div>
   <div id="hint"></div>
   <div id="filterbar">
     <input id="search" placeholder="/ search" autocomplete="off">
@@ -139,6 +151,7 @@ h3 { font-size:13px; color:var(--muted); margin:10px 0 2px; }
     <span id="share-ind" hidden></span>
     <span id="sync-ind" title="background sync" hidden></span>
     <span id="active-flt"></span>
+    <button id="files-btn" class="chip touch-only">Files</button>
     <button id="help-btn" title="Help &amp; shortcuts (?)">?</button>
   </div>
 </header>
@@ -1688,7 +1701,7 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden) { flushAll(); bumpActivity(); scanTick(); }   // catch up on what changed while away
   armPoll();                                                          // hidden + remote: stops polling outright
 });
-$('#help-btn').onclick = () => { $('#help').hidden = !$('#help').hidden; };
+$('#help-btn').onclick = () => { document.body.classList.remove('menu-open'); $('#help').hidden = !$('#help').hidden; };
 $('#help-close').onclick = () => { $('#help').hidden = true; };
 
 // --- touch UI ---
@@ -1717,6 +1730,9 @@ $('#img-input').onchange = async () => {
   inp.value = '';   // picking the same photo twice still fires change
   if (f) await attachImage(f, f.type);
 };
+$('#menu-btn').onclick = () => document.body.classList.toggle('menu-open');
+$('#files-btn').onclick = () => { document.body.classList.remove('menu-open'); openPanel(); };
+$('#active-flt').onclick = () => clearFilters();   // no Esc key on a phone
 function renderActionState() {
   const none = !selRef();
   document.querySelectorAll('.tcmd').forEach(b => { b.disabled = none; });
@@ -2434,7 +2450,9 @@ function renderFilterState() {
   const af = [];
   if (App.filter.tag) af.push('tag:' + App.filter.tag);
   if (App.filter.topic) af.push('topic:' + App.filter.topic);
-  $('#active-flt').textContent = af.length ? af.join('  ') + '   (Esc clears)' : '';
+  $('#active-flt').textContent = af.length ? af.join('  ') + (isTouchUI() ? '   (tap to clear)' : '   (Esc clears)') : '';
+  const f = App.filter;
+  $('#menu-btn').classList.toggle('has-filter', !!(f.deadline || f.priority || f.tag || f.topic || f.text));
   renderShareControl();
 }
 

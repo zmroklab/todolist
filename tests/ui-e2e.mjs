@@ -1774,6 +1774,33 @@ const noted = await evaljs(`(async () => { await syncIdle();
 check('phone editor: notes Save writes the note and expands the task',
       noted.file.startsWith('* TODO Phone one edited :errand:\n  from the phone\n') && noted.shown, JSON.stringify(noted));
 
+// --- ☰ header menu ---
+check('phone menu: fixture loads', await resetHome('* TODO Phone one :errand:\n* TODO Phone two\n'));
+const closedMenu = await evaljs(`({ chip: getComputedStyle($('.flt')).display,
+                                    search: getComputedStyle($('#search')).display,
+                                    btn: getComputedStyle($('#menu-btn')).display })`);
+check('phone menu: filters are collapsed behind ☰',
+      closedMenu.chip === 'none' && closedMenu.search === 'none' && closedMenu.btn !== 'none', JSON.stringify(closedMenu));
+await tapEl(`$('#menu-btn')`);
+const openMenu = await evaljs(`({ chip: getComputedStyle($('.flt')).display, files: getComputedStyle($('#files-btn')).display })`);
+check('phone menu: ☰ shows the filters and a Files button',
+      openMenu.chip !== 'none' && openMenu.files !== 'none', JSON.stringify(openMenu));
+await tapEl(`$('.flt[data-v="today"]')`);
+const onToday = await evaljs(`({ f: App.filter.deadline, dot: $('#menu-btn').classList.contains('has-filter') })`);
+check('phone menu: a filter chip applies and ☰ shows the dot', onToday.f === 'today' && onToday.dot, JSON.stringify(onToday));
+await tapEl(`$('.flt[data-v="today"]')`);
+const offToday = await evaljs(`({ f: App.filter.deadline, dot: $('#menu-btn').classList.contains('has-filter') })`);
+check('phone menu: tapping it again clears it and the dot', offToday.f === null && !offToday.dot, JSON.stringify(offToday));
+await tapEl(`$('#menu-btn')`);
+await tapEl(`${titleEl('Phone one')}.closest('.task').querySelector('.chip.tag')`);
+const tagOn = await evaljs(`({ tag: App.filter.tag, text: $('#active-flt').textContent,
+                               shown: getComputedStyle($('#active-flt')).display })`);
+check('phone menu: the active tag filter stays visible with the menu closed',
+      tagOn.tag === 'errand' && /tag:errand/.test(tagOn.text) && /tap to clear/.test(tagOn.text) && tagOn.shown !== 'none',
+      JSON.stringify(tagOn));
+await tapEl(`$('#active-flt')`);
+check('phone menu: tapping the active filter clears it', await evaljs(`App.filter.tag === null`));
+
 // ---- mobile teardown
 await cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
 await cdp('Emulation.clearDeviceMetricsOverride');
