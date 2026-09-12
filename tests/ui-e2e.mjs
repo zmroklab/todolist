@@ -254,6 +254,20 @@ const cleared = await evaljs(`__files.get('home.org')`);
 check('empty deadline editor clears it back off Garage cleanup',
       !cleared.split('* TODO Garage cleanup')[1].includes('DEADLINE'), cleared);
 
+// --- deadline editor accepts a time alongside the date ---
+await key('s', 'KeyS', 's', 83);
+await sleep(250);
+await cdp('Input.insertText', { text: '2026-08-01 14:30' });
+await key('Enter', 'Enter', '\r', 13);
+await sleep(500);
+const afterTime = await evaljs(`({
+  file: __files.get('home.org'),
+  chip: document.querySelector('.task.sel [class*="dl-"]')?.textContent ?? null,
+})`);
+check('deadline editor writes DEADLINE line with time',
+      afterTime.file.includes('DEADLINE: <2026-08-01 Sat 14:30>'), afterTime.file);
+check('selected row chip shows the time', (afterTime.chip || '').includes('14:30'), JSON.stringify(afterTime.chip));
+
 // --- repeating task: s sets a repeater, d advances, D rolls back ---
 await evaljs(`(() => {
   const r = App.visible.find(r => !r.parent && r.task.title === 'Garage cleanup');

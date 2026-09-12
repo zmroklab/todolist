@@ -1472,7 +1472,8 @@ function taskRow(ref, mode) {
   }
   if (t.deadline) {
     const b = span('chip dl-' + (Core.deadlineBucket(t.deadline, todayIso()) || 'later'));
-    b.textContent = '⏰ ' + t.deadline.slice(5);
+    const hm = Core.timeStart(t.time);   // a range shows its start
+    b.textContent = '⏰ ' + t.deadline.slice(5) + (hm ? ' ' + hm : '');
     meta.append(b);
   }
   if (t.repeat) {
@@ -1967,7 +1968,7 @@ function hintText(p) {
   const parts = ['→ ' + shown + '.org', '“' + p.title + '”'];
   if (p.priority) parts.push('#' + p.priority);
   if (p.tags.length) parts.push(':' + p.tags.join(':') + ':');
-  if (p.deadline) parts.push('⏰ ' + p.deadline);
+  if (p.deadline) parts.push('⏰ ' + p.deadline + (p.time ? ' ' + p.time : ''));
   if (p.effort) parts.push('~' + p.effort);
   return parts.join('  ');
 }
@@ -2468,15 +2469,18 @@ document.addEventListener('keydown', async e => {
   if (k === 's') {
     e.preventDefault();   // don't type the triggering key into the editor input
     const r = selRef();
-    if (r) inlineEdit((r.task.deadline || '') + (r.task.repeat ? ' ' + r.task.repeat : ''),
-        'deadline: 2026-08-01 / fri / tom [+1w] — empty clears', async v => {
-      let s = v.trim(), repeat = null;
-      const rm = s.match(/\s*(\+\d+[dwmy])$/);
-      if (rm) { repeat = rm[1]; s = s.slice(0, rm.index).trim(); }
-      const iso = s ? Core.parseDateToken(s, todayIso()) : null;
-      if (s && !iso) { toast('Unrecognized date: ' + s); return; }
+    if (r) inlineEdit([r.task.deadline, r.task.time, r.task.repeat].filter(Boolean).join(' '),
+        'deadline: 2026-08-01 / fri / tom [14:30] [+1w] — empty clears', async v => {
+      let iso = null, time = null, repeat = null, hit;
+      for (const tok of v.trim().split(/\s+/).filter(Boolean)) {
+        if (/^\+\d+[dwmy]$/.test(tok)) repeat = tok;
+        else if ((hit = Core.parseTimeToken(tok))) time = hit;
+        else if ((hit = Core.parseDateToken(tok, todayIso()))) iso = hit;
+        else { toast('Unrecognized: ' + tok); return; }
+      }
+      if (time && !iso) iso = todayIso();   // a time alone means today
       if (repeat && !iso) { toast('A repeater needs a date'); return; }
-      await mutateTask(r.topic, keyPath(r), t => Core.setDeadline(t, iso, repeat));
+      await mutateTask(r.topic, keyPath(r), t => Core.setDeadline(t, iso, repeat, time));
     });
     return;
   }
@@ -2533,18 +2537,19 @@ document.addEventListener('keydown', async e => {
                    t.priority && '#' + t.priority,
                    ...t.tags.map(x => ':' + x + ':'),
                    t.deadline && '@' + t.deadline,
+                   t.time && '@' + t.time,
                    t.repeat,
                    t.effort && '~' + t.effort].filter(Boolean).join(' ');
       // the edit line is the whole truth for heading-level fields:
       // deleting "#A" from it removes the priority (WYSIWYG heading edit)
-      inlineEdit(cur, 'title #A :tag: @date ~2h — omitted parts are removed', async v => {
+      inlineEdit(cur, 'title #A :tag: @date @14:30 ~2h — omitted parts are removed', async v => {
         const p = Core.parseQuickAdd(v, todayIso());
         if (!p.title) { toast('Title required'); return; }
         await mutateTask(r.topic, keyPath(r), x => {
           Core.setTitle(x, p.title);
           Core.setPriority(x, p.priority);
           Core.setTags(x, p.tags);
-          Core.setDeadline(x, p.deadline, p.repeat);
+          Core.setDeadline(x, p.deadline, p.repeat, p.time);
           Core.setEffort(x, p.effort);
         });
       });
