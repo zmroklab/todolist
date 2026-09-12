@@ -562,6 +562,10 @@ const Core = (() => {
   const PRI_ORDER = { A: 0, B: 1, C: 2 };
   const priRank = p => (p in PRI_ORDER ? PRI_ORDER[p] : 3);
 
+  // deadline + time as one comparable string; untimed sorts after timed
+  // within the same day. Null (no deadline at all) is the callers' business.
+  const dlKey = t => t.deadline ? t.deadline + '\t' + (timeStart(t.time) || '99:99') : null;
+
   function deadlineBucket(iso, today) {
     if (!iso) return null;
     if (iso < today) return 'overdue';
@@ -582,7 +586,7 @@ const Core = (() => {
     const done = refs.filter(r => !r.parent && r.task.state === 'DONE');
     const radar = open.filter(r => r.task.state === 'NEXT' || (r.task.deadline && r.task.deadline <= horizon));
     radar.sort((a, b) => {
-      const ad = a.task.deadline || '9999', bd = b.task.deadline || '9999';
+      const ad = dlKey(a.task) || '9999', bd = dlKey(b.task) || '9999';
       if (ad !== bd) return ad < bd ? -1 : 1;
       return priRank(a.task.priority) - priRank(b.task.priority);
     });
@@ -620,7 +624,7 @@ const Core = (() => {
   function sortBacklog(refs, mode) {
     const dir = mode === 'created-desc' ? -1 : 1;
     const val = r => mode === 'priority' ? priRank(r.task.priority)
-      : mode === 'deadline' ? r.task.deadline
+      : mode === 'deadline' ? dlKey(r.task)
       : r.task.added;
     return [...refs].sort((a, b) => {
       const av = val(a), bv = val(b);

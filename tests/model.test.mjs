@@ -109,3 +109,25 @@ test('matchesFamily: parent passes when only a child matches', () => {
   assert.ok(Core.matchesFamily(r, { tag: 'urgent' }, T));
   assert.ok(!Core.matchesFamily(r, { tag: 'other' }, T));
 });
+
+test('radar orders one day by time, untimed rows last', () => {
+  const files = [{ topic: 'w', file: mk(
+    '* NEXT [#A] untimed\n  DEADLINE: <2026-07-20 Mon>\n' +
+    '* NEXT [#C] afternoon\n  DEADLINE: <2026-07-20 Mon 14:30>\n' +
+    '* NEXT [#C] morning\n  DEADLINE: <2026-07-20 Mon 9:00>\n' +   // unpadded on purpose
+    '* NEXT [#A] next-day\n  DEADLINE: <2026-07-21 Tue 08:00>\n' +
+    '* NEXT [#A] no-deadline\n') }];
+  const m = Core.buildModel(files, T);
+  assert.deepEqual(m.radar.map(r => r.task.title),
+                   ['morning', 'afternoon', 'untimed', 'next-day', 'no-deadline']);
+});
+
+test('sortBacklog: deadline mode breaks ties by time, no deadline still last', () => {
+  const f = mk('* TODO none\n' +
+               '* TODO pm\n  DEADLINE: <2026-09-01 Tue 14:30>\n' +
+               '* TODO am\n  DEADLINE: <2026-09-01 Tue 09:00>\n' +
+               '* TODO untimed\n  DEADLINE: <2026-09-01 Tue>\n');
+  const refs = f.tasks.map((task, index) => ({ topic: 'w', index, task }));
+  assert.deepEqual(Core.sortBacklog(refs, 'deadline').map(r => r.task.title),
+                   ['am', 'pm', 'untimed', 'none']);
+});
