@@ -59,7 +59,7 @@ h3 { font-size:13px; color:var(--muted); margin:10px 0 2px; }
 #done-toggle { cursor:pointer; }
 #help-btn { margin-left:auto; width:24px; height:24px; border-radius:50%; border:1px solid var(--line); background:#fff; color:var(--muted); font:bold 13px/22px system-ui; cursor:pointer; }
 #help-btn:hover { border-color:var(--accent); color:var(--accent); }
-#help-close { position:absolute; top:12px; right:14px; border:none; background:none; font-size:16px; color:var(--muted); cursor:pointer; }
+#help-close, .panel-close { position:absolute; top:12px; right:14px; border:none; background:none; font-size:16px; color:var(--muted); cursor:pointer; }
 #help p { margin:6px 0; max-width:60ch; }
 #help code { background:#eee; border-radius:4px; padding:1px 5px; font:12px ui-monospace, monospace; }
 #files-panel, #share-panel { position:fixed; inset:15% 25%; overflow:auto; background:#fff; border:1px solid var(--line); border-radius:12px; box-shadow:0 8px 30px rgba(0,0,0,.15); padding:20px 24px; z-index:8; }
@@ -121,6 +121,15 @@ h3 { font-size:13px; color:var(--muted); margin:10px 0 2px; }
   body.menu-open #search { width:100%; }
   #help-btn { margin-left:0; width:44px; height:44px; }
   #active-flt { cursor:pointer; }
+  #help, #files-panel, #share-panel { inset:0; border:none; border-radius:0;
+                                      padding:16px 16px calc(16px + env(safe-area-inset-bottom)); }
+  .panel-close, #help-close { min-width:44px; min-height:44px; top:6px; right:6px; }
+  #files-actions { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 12px; }
+  #files-actions .chip, .frow .chip, .fld-btns .chip { min-height:40px; }
+  #files-hint { display:none; }
+  .fld-btns { display:flex; gap:8px; margin-top:4px; }
+  .srow { flex-wrap:wrap; }
+  .srow .sname { flex:1 1 100%; }
 }
 [hidden] { display:none !important; }
 </style>
@@ -243,11 +252,18 @@ expression shows nothing rather than risking a leak.</p>
 </table>
 </div>
 <div id="files-panel" hidden>
+<button id="files-close" class="panel-close touch-only" title="Close (Esc)">✕</button>
 <h2 id="files-title">Connected files</h2>
+<div id="files-actions" class="touch-only">
+  <button id="fa-drive" class="chip">Select Drive files</button>
+  <button id="fa-drive-setup" class="chip">Drive settings</button>
+  <button id="fa-new" class="chip">New file</button>
+</div>
 <div id="files-list"></div>
 <p id="files-hint"></p>
 </div>
 <div id="share-panel" hidden>
+<button id="share-close" class="panel-close touch-only" title="Close (Esc)">✕</button>
 <h2>Share filter presets</h2>
 <div id="share-list"></div>
 <p id="share-hint">Words match a topic or a tag; <code>!word</code> hides every
@@ -1192,6 +1208,7 @@ async function pickDriveFiles(token) {
     // but the reference doesn't mark setDeveloperKey required the way it
     // does setAppId — so it's optional here. If a picker ever refuses to
     // open, paste a Picker-API key in (Files panel: G) and it comes back.
+    if (isTouchUI()) builder.setSize(window.innerWidth, window.innerHeight);   // default is a desktop-sized dialog
     if (gdriveApiKey) builder.setDeveloperKey(gdriveApiKey);
     dlog('opening picker | appId', gdriveAppId() || '(EMPTY — setAppId got nothing)',
          '| developerKey', gdriveApiKey ? 'set' : 'not set');
@@ -1733,6 +1750,22 @@ $('#img-input').onchange = async () => {
 $('#menu-btn').onclick = () => document.body.classList.toggle('menu-open');
 $('#files-btn').onclick = () => { document.body.classList.remove('menu-open'); openPanel(); };
 $('#active-flt').onclick = () => clearFilters();   // no Esc key on a phone
+$('#files-close').onclick = closePanel;
+$('#share-close').onclick = closeSharePanel;
+$('#fa-drive').onclick = () => {
+  if (gdrivePickerReady()) connectGDrive();
+  else { App.panel.mode = 'gdrive-setup'; renderPanel(); }
+};
+$('#fa-drive-setup').onclick = () => { App.panel.mode = 'gdrive-setup'; renderPanel(); };
+$('#fa-new').onclick = () => { App.panel.mode = 'new'; renderPanel(); };
+// No local folders on a phone: a new topic file goes next to the Drive files,
+// preferring the folder of the topic last added to (the createTopic rule).
+function driveBackendForNew() {
+  const last = findEntry(App.lastTopic);
+  if (last && last.backend.kind === 'gdrive') return last.backend;
+  const d = App.files.find(e => e.backend.kind === 'gdrive');
+  return d ? d.backend : null;
+}
 function renderActionState() {
   const none = !selRef();
   document.querySelectorAll('.tcmd').forEach(b => { b.disabled = none; });
@@ -2168,6 +2201,7 @@ function renderPanel() {
   if (!p.open) return;
   const box = $('#files-list');
   $('#files-title').textContent = PANEL_TITLES[p.mode] || PANEL_TITLES.list;
+  $('#files-actions').hidden = p.mode !== 'list';
   if (p.mode === 'pick') {
     box.replaceChildren(...p.names.map((name, i) => {
       const row = div('frow' + (i === p.idx ? ' sel' : ''));
@@ -2182,25 +2216,40 @@ function renderPanel() {
   }
   if (p.mode === 'new') {
     const inp = document.createElement('input');
-    inp.placeholder = 'new topic name — Enter, then choose its folder';
-    box.replaceChildren(inp);
-    $('#files-hint').textContent = 'Enter continue · Esc back';
-    inp.focus();
-    inp.onkeydown = async ev => {
-      ev.stopPropagation();
-      if (ev.key === 'Escape') { p.mode = 'list'; renderPanel(); return; }
-      if (ev.key !== 'Enter') return;
+    inp.placeholder = FSA_OK ? 'new topic name — Enter, then choose its folder'
+                             : 'new topic name — created in your Drive folder';
+    const create = async () => {
       const topic = inp.value.trim().toLowerCase();
       if (!/^[\w-]+$/.test(topic)) { toast('Topic names are letters, digits, - and _'); return; }
       if (findEntry(topic)) { toast('Topic "' + topic + '" already connected'); return; }
-      if (!FSA_OK) { toast('New local files need Chrome or Edge on desktop'); return; }
-      try {
-        const dir = await showDirectoryPicker({ mode: 'readwrite' });
-        await createTopicInBackend(fsaBackend(dir), topic);
-        p.mode = 'list'; p.idx = 0;
-        render(); renderPanel();
-        toast(topic + '.org created and connected');
-      } catch { /* user cancelled the picker */ }
+      let backend;
+      if (FSA_OK) {
+        try { backend = fsaBackend(await showDirectoryPicker({ mode: 'readwrite' })); }
+        catch { return; }   // user cancelled the picker
+      } else {
+        backend = driveBackendForNew();
+        if (!backend) { toast('Connect Google Drive first'); return; }
+      }
+      try { await createTopicInBackend(backend, topic); }
+      catch (err) { toast('Could not create ' + topic + '.org: ' + err.message); return; }
+      p.mode = 'list'; p.idx = 0;
+      render(); renderPanel();
+      toast(topic + '.org created and connected');
+    };
+    const ok = document.createElement('button');
+    ok.className = 'chip fld-save'; ok.textContent = 'Create'; ok.onclick = create;
+    const back = document.createElement('button');
+    back.className = 'chip fld-cancel'; back.textContent = 'Cancel';
+    back.onclick = () => { p.mode = 'list'; renderPanel(); };
+    const btns = div('fld-btns touch-only');
+    btns.append(ok, back);
+    box.replaceChildren(inp, btns);
+    $('#files-hint').textContent = 'Enter continue · Esc back';
+    inp.focus();
+    inp.onkeydown = ev => {
+      ev.stopPropagation();
+      if (ev.key === 'Escape') { p.mode = 'list'; renderPanel(); return; }
+      if (ev.key === 'Enter') create();
     };
     return;
   }
@@ -2223,19 +2272,7 @@ function renderPanel() {
     keyInp.id = 'gd-api-key';
     keyInp.placeholder = 'AIza…';
     keyInp.value = gdriveApiKey;
-    box.replaceChildren(
-      field('Google OAuth Web client ID',
-            'Cloud Console → Credentials. Must start with the Cloud project number — that prefix is what the file picker needs.',
-            idInp),
-      field('Google API key (optional)',
-            'Leave empty unless the picker complains; restrict it to the Picker API.',
-            keyInp));
-    $('#files-hint').textContent = 'Tab between fields · Enter save & connect · Esc back';
-    idInp.focus();
-    const submit = async ev => {
-      ev.stopPropagation();
-      if (ev.key === 'Escape') { p.mode = 'list'; renderPanel(); return; }
-      if (ev.key !== 'Enter') return;
+    const saveDriveSetup = async () => {
       const id = idInp.value.trim();
       if (!id) { toast('Client ID required'); return; }
       setGdriveClientId(id);
@@ -2243,6 +2280,28 @@ function renderPanel() {
       p.mode = 'list'; p.idx = 0;
       renderPanel();
       await connectGDrive();
+    };
+    const ok = document.createElement('button');
+    ok.className = 'chip fld-save'; ok.textContent = 'Save & connect'; ok.onclick = saveDriveSetup;
+    const back = document.createElement('button');
+    back.className = 'chip fld-cancel'; back.textContent = 'Cancel';
+    back.onclick = () => { p.mode = 'list'; renderPanel(); };
+    const btns = div('fld-btns touch-only');
+    btns.append(ok, back);
+    box.replaceChildren(
+      field('Google OAuth Web client ID',
+            'Cloud Console → Credentials. Must start with the Cloud project number — that prefix is what the file picker needs.',
+            idInp),
+      field('Google API key (optional)',
+            'Leave empty unless the picker complains; restrict it to the Picker API.',
+            keyInp),
+      btns);
+    $('#files-hint').textContent = 'Tab between fields · Enter save & connect · Esc back';
+    if (!isTouchUI()) idInp.focus();   // on a phone, focusing pops the keyboard over the buttons
+    const submit = ev => {
+      ev.stopPropagation();
+      if (ev.key === 'Escape') { p.mode = 'list'; renderPanel(); return; }
+      if (ev.key === 'Enter') saveDriveSetup();
     };
     idInp.onkeydown = submit;
     keyInp.onkeydown = submit;
@@ -2253,8 +2312,9 @@ function renderPanel() {
   p.idx = Math.max(0, Math.min(p.idx, pf.length - 1));
   if (!pf.length) {
     const row = div('frow muted');
-    row.textContent = FSA_OK ? 'No files connected — press c for a folder or g for Google Drive'
-                             : 'No files connected — press g to connect Google Drive';
+    row.textContent = isTouchUI() ? 'No files connected — tap Select Drive files'
+                    : FSA_OK ? 'No files connected — press c for a folder or g for Google Drive'
+                    : 'No files connected — press g to connect Google Drive';
     box.replaceChildren(row);
   } else {
     box.replaceChildren(...pf.map((e, i) => {

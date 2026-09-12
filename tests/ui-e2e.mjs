@@ -1801,6 +1801,45 @@ check('phone menu: the active tag filter stays visible with the menu closed',
 await tapEl(`$('#active-flt')`);
 check('phone menu: tapping the active filter clears it', await evaljs(`App.filter.tag === null`));
 
+// --- Files panel and overlays ---
+check('phone files: fixture loads', await resetHome('* TODO Phone one :errand:\n* TODO Phone two\n'));
+await tapEl(`$('#menu-btn')`);
+await tapEl(`$('#files-btn')`);
+const panel = await evaljs(`(() => { const b = $('#files-panel').getBoundingClientRect();
+  return { open: App.panel.open, menu: document.body.classList.contains('menu-open'),
+           full: Math.abs(b.width - innerWidth) <= 1 && Math.abs(b.height - innerHeight) <= 1,
+           drive: getComputedStyle($('#fa-drive')).display !== 'none' && $('#fa-drive').textContent }; })()`);
+check('phone files: Files opens a full-screen panel and closes the menu',
+      panel.open && !panel.menu && panel.full, JSON.stringify(panel));
+check('phone files: Select Drive files is offered', panel.drive === 'Select Drive files', JSON.stringify(panel));
+await tapEl(`$('#fa-drive-setup')`);
+const setupMode = await evaljs(`({ mode: App.panel.mode, save: !!$('#files-list .fld-save'), actions: $('#files-actions').hidden })`);
+check('phone files: Drive settings opens the setup form with Save & connect',
+      setupMode.mode === 'gdrive-setup' && setupMode.save && setupMode.actions === true, JSON.stringify(setupMode));
+await tapEl(`$('#files-list .fld-cancel')`);
+check('phone files: Cancel returns to the list', await evaljs(`App.panel.mode === 'list' && !$('#files-actions').hidden`));
+await tapEl(`$('#files-close')`);
+check('phone files: ✕ closes the panel', await evaljs(`!App.panel.open && $('#files-panel').hidden`));
+
+const newDrive = await evaljs(`(() => {
+  const keep = App.lastTopic;
+  App.lastTopic = 'home';
+  const fallback = driveBackendForNew() === App.files.find(e => e.backend.kind === 'gdrive').backend;
+  App.lastTopic = 'drive2';
+  const preferred = driveBackendForNew() === findEntry('drive2').backend;
+  App.lastTopic = keep;
+  return { fallback, preferred };
+})()`);
+check('phone files: a new file goes to the last-used Drive folder, else the first Drive folder',
+      newDrive.fallback && newDrive.preferred, JSON.stringify(newDrive));
+
+await evaljs(`(openSharePanel(), true)`);
+const shareFull = await evaljs(`(() => { const b = $('#share-panel').getBoundingClientRect();
+  return Math.abs(b.width - innerWidth) <= 1; })()`);
+check('phone share: the presets panel is full-screen', shareFull === true);
+await tapEl(`$('#share-close')`);
+check('phone share: ✕ closes it', await evaljs(`!App.sharePanel.open`));
+
 // ---- mobile teardown
 await cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
 await cdp('Emulation.clearDeviceMetricsOverride');
