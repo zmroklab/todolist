@@ -110,11 +110,19 @@ not damage its deadline timestamp — now holds for times as well.
 
 - `setDeadline(t, iso, repeat, time)` — fourth parameter. When `iso` is
   null, both `repeat` and `time` are forced to null.
-- `setTime(t, chunk)` — sets the time on a task that already has a
-  deadline; a no-op when `t.deadline` is null.
-- `advanceRepeat` and `bumpDeadline` are **not** modified. They move
-  `t.deadline` only, so the time survives day bumps and repeat advances
-  for free.
+- `makeTask` reads `fields.time`, so a time typed into quick-add reaches
+  the new block. Both call sites already pass the `parseQuickAdd` result
+  through whole.
+- `advanceRepeat` is **not** modified: it moves `t.deadline` only, so the
+  time survives a repeat advance for free.
+- `bumpDeadline` needs one small change — it re-enters through
+  `setDeadline`, so it must forward `t.time` or a `>` / `<` day bump
+  would silently drop the time.
+
+There is deliberately no `setTime` mutation. Every path that edits a time
+(the `s` editor, the `e` editor) resolves date, time, and repeater from
+one line and writes them in a single `setDeadline` call, so a separate
+setter would have no caller.
 
 ## Quick-add and the heading editor
 
