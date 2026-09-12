@@ -10,6 +10,8 @@ const CORPUS = [
   'preamble only, no tasks\n',
   '',
   '* NEXT keep scheduled\n  SCHEDULED: <2026-08-01 Sat> DEADLINE: <2026-08-02 Sun>\n  body\n',
+  '* NEXT Standup\n  DEADLINE: <2026-08-01 Sat 09:00 +1w>\n',
+  '* TODO Sync\n  DEADLINE: <2026-08-01 Sat 10:00-11:00>\n  body\n',
   NESTED,
   '* TODO parent\n** TODO child one\n   child body\n** DONE child two\n*** deep stays\n    deep body\n* TODO after\n',
   '* TODO parent\n** child no trailing newline',
@@ -227,4 +229,11 @@ test('setBody collapses whitespace-only lines to empty', () => {
   const f = Core.parseOrg('* TODO x\n');
   Core.setBody(f.tasks[0], ['a', '   ', 'b']);
   assert.equal(Core.serializeFile(f), '* TODO x\n  a\n\n  b\n');
+});
+
+test('a deadline time survives an edit to another field of the same task', () => {
+  const f = Core.parseOrg('* NEXT Sync\n  DEADLINE: <2026-08-01 Sat 10:00-11:00>\n  body\n');
+  Core.setPriority(f.tasks[0], 'A');
+  assert.equal(Core.serializeFile(f),
+               '* NEXT [#A] Sync\n  DEADLINE: <2026-08-01 Sat 10:00-11:00>\n  body\n');
 });

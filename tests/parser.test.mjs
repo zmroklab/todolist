@@ -125,3 +125,45 @@ test('bumpDeadline shifts an existing deadline and seeds today when absent', () 
   Core.bumpDeadline(minus, -1, '2026-07-18');
   assert.equal(minus.deadline, '2026-07-18');         // no deadline: < also starts at today
 });
+
+test('parseOrg captures a deadline time into t.time', () => {
+  const f = Core.parseOrg('* TODO Dentist\n  DEADLINE: <2026-08-01 Sat 14:30>\n');
+  assert.equal(f.tasks[0].deadline, '2026-08-01');
+  assert.equal(f.tasks[0].time, '14:30');
+  assert.equal(f.tasks[0].repeat, null);
+});
+
+test('deadline times: with a repeater, as a range, without a day name, absent', () => {
+  const both = Core.parseOrg('* TODO x\n  DEADLINE: <2026-08-01 Sat 14:30 +1w>\n').tasks[0];
+  assert.equal(both.time, '14:30');
+  assert.equal(both.repeat, '+1w');
+  const range = Core.parseOrg('* TODO x\n  DEADLINE: <2026-08-01 Sat 10:00-11:00>\n').tasks[0];
+  assert.equal(range.time, '10:00-11:00');
+  const noDay = Core.parseOrg('* TODO x\n  DEADLINE: <2026-08-01 09:15>\n').tasks[0];
+  assert.equal(noDay.time, '09:15');
+  const plain = Core.parseOrg('* TODO x\n  DEADLINE: <2026-08-01 Sat>\n').tasks[0];
+  assert.equal(plain.time, null);
+});
+
+// A warning period is syntax the app ignores rather than understands; the
+// point here is that the timestamp still yields a deadline at all.
+test('a warning period still parses and is not mistaken for a time', () => {
+  const t = Core.parseOrg('* TODO x\n  DEADLINE: <2026-08-01 Sat +1w -2d>\n').tasks[0];
+  assert.equal(t.deadline, '2026-08-01');
+  assert.equal(t.time, null);
+});
+
+test('timeStart normalizes the hour and takes the start of a range', () => {
+  assert.equal(Core.timeStart('14:30'), '14:30');
+  assert.equal(Core.timeStart('10:00-11:00'), '10:00');
+  assert.equal(Core.timeStart('9:00'), '09:00');
+  assert.equal(Core.timeStart(null), null);
+  assert.equal(Core.timeStart(''), null);
+});
+
+test('orgActive places the time between day name and repeater', () => {
+  assert.equal(Core.orgActive('2026-08-01', null, '14:30'), '<2026-08-01 Sat 14:30>');
+  assert.equal(Core.orgActive('2026-08-01', '+1w', '14:30'), '<2026-08-01 Sat 14:30 +1w>');
+  assert.equal(Core.orgActive('2026-08-01', '+1w'), '<2026-08-01 Sat +1w>');
+  assert.equal(Core.orgActive('2026-08-01'), '<2026-08-01 Sat>');
+});
