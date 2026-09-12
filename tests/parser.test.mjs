@@ -167,3 +167,19 @@ test('orgActive places the time between day name and repeater', () => {
   assert.equal(Core.orgActive('2026-08-01', '+1w'), '<2026-08-01 Sat +1w>');
   assert.equal(Core.orgActive('2026-08-01'), '<2026-08-01 Sat>');
 });
+
+test('parseTimeToken forms', () => {
+  assert.equal(Core.parseTimeToken('14:30'), '14:30');
+  assert.equal(Core.parseTimeToken('9:00'), '09:00');       // hour padded
+  assert.equal(Core.parseTimeToken('00:00'), '00:00');
+  assert.equal(Core.parseTimeToken('23:59'), '23:59');
+  assert.equal(Core.parseTimeToken('10:00-11:00'), '10:00-11:00');
+  assert.equal(Core.parseTimeToken('9:05-10:00'), '09:05-10:00');
+  assert.equal(Core.parseTimeToken('24:00'), null);         // hours are 0-23
+  assert.equal(Core.parseTimeToken('25:70'), null);
+  assert.equal(Core.parseTimeToken('14:5'), null);          // minutes need two digits
+  assert.equal(Core.parseTimeToken('1430'), null);
+  assert.equal(Core.parseTimeToken('14.30'), null);
+  assert.equal(Core.parseTimeToken('10:00-25:00'), null);   // both halves validated
+  assert.equal(Core.parseTimeToken(''), null);
+});

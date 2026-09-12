@@ -152,3 +152,34 @@ test('makeTask stores a repeater', () => {
   const t = Core.makeTask({ title: 'Water', deadline: '2026-08-01', repeat: '+1w' }, '2026-07-25');
   assert.equal(t.repeat, '+1w');
 });
+
+// --- deadline times ride along with the existing deadline mutations ---
+
+test('setDeadline carries a time; clearing the date clears it', () => {
+  const f = Core.parseOrg('* TODO x\n');
+  const t = f.tasks[0];
+  Core.setDeadline(t, '2026-08-01', '+1w', '14:30');
+  assert.equal(Core.serializeFile(f), '* TODO x\n  DEADLINE: <2026-08-01 Sat 14:30 +1w>\n');
+  Core.setDeadline(t, null);
+  assert.equal(t.time, null);
+  assert.equal(Core.serializeFile(f), '* TODO x\n');
+});
+
+test('day bumps and repeat advances keep the time', () => {
+  const f = Core.parseOrg('* NEXT Standup\n  DEADLINE: <2026-08-01 Sat 09:00 +1w>\n');
+  const t = f.tasks[0];
+  Core.bumpDeadline(t, 1, '2026-07-18');
+  assert.equal(t.deadline, '2026-08-02');
+  assert.equal(t.time, '09:00');
+  assert.equal(t.repeat, '+1w');
+  Core.advanceRepeat(t, 1);
+  assert.equal(t.deadline, '2026-08-09');
+  assert.equal(t.time, '09:00');
+  assert.equal(Core.serializeFile(f), '* NEXT Standup\n  DEADLINE: <2026-08-09 Sun 09:00 +1w>\n');
+});
+
+test('makeTask carries a time onto the new block', () => {
+  const t = Core.makeTask({ title: 'Dentist', deadline: '2026-08-01', time: '14:30' }, '2026-07-18');
+  assert.equal(Core.renderTask(t),
+    '* TODO Dentist\n  DEADLINE: <2026-08-01 Sat 14:30>\n  :PROPERTIES:\n  :ADDED:   [2026-07-18 Sat]\n  :END:\n');
+});
