@@ -492,7 +492,7 @@ const Core = (() => {
   // --- quick-add tokens ---
   function parseQuickAdd(input, today) {
     let s = input.trim();
-    const out = { topic: null, title: '', priority: null, tags: [], deadline: null, repeat: null, effort: null };
+    const out = { topic: null, title: '', priority: null, tags: [], deadline: null, time: null, repeat: null, effort: null };
     const tm = s.match(/^([\w-]+):\s+/);
     if (tm) { out.topic = tm[1].toLowerCase(); s = s.slice(tm[0].length); }
     const titleWords = [];
@@ -500,12 +500,14 @@ const Core = (() => {
       let m;
       if ((m = w.match(/^#([ABCabc])$/))) out.priority = m[1].toUpperCase();
       else if ((m = w.match(/^:([A-Za-z0-9_@#%:-]+):$/))) out.tags.push(...m[1].split(':').filter(Boolean));
+      else if ((m = w.match(/^@(\S+)$/)) && parseTimeToken(m[1])) out.time = parseTimeToken(m[1]);
       else if ((m = w.match(/^@(\S+)$/)) && parseDateToken(m[1], today)) out.deadline = parseDateToken(m[1], today);
       else if ((m = w.match(/^\+\d+[dwmy]$/))) out.repeat = w;
       else if ((m = w.match(/^~(\d+(?:\.\d+)?[hmd])$/))) out.effort = m[1];
       else titleWords.push(w);
     }
-    if (!out.deadline) out.repeat = null;
+    if (out.time && !out.deadline) out.deadline = today;   // a time alone means today
+    if (!out.deadline) { out.repeat = null; out.time = null; }
     out.title = titleWords.join(' ');
     return out;
   }

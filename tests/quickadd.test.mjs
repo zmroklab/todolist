@@ -5,15 +5,16 @@ import { Core } from './harness.mjs';
 const T = '2026-07-18';
 
 test('full quick-add line', () => {
-  const p = Core.parseQuickAdd('work: Ship report #A :urgent: @jul22 ~3h', T);
+  const p = Core.parseQuickAdd('work: Ship report #A :urgent: @jul22 @14:30 ~3h', T);
   assert.deepEqual(p, { topic: 'work', title: 'Ship report', priority: 'A',
-                        tags: ['urgent'], deadline: '2026-07-22', repeat: null, effort: '3h' });
+                        tags: ['urgent'], deadline: '2026-07-22', time: '14:30',
+                        repeat: null, effort: '3h' });
 });
 
 test('title only — everything else defaults', () => {
   const p = Core.parseQuickAdd('Just a task', T);
   assert.deepEqual(p, { topic: null, title: 'Just a task', priority: null,
-                        tags: [], deadline: null, repeat: null, effort: null });
+                        tags: [], deadline: null, time: null, repeat: null, effort: null });
 });
 
 test('date forms pass through parseDateToken', () => {
@@ -38,4 +39,28 @@ test('multiple tag groups and effort forms', () => {
 
 test('lower-case priority accepted', () => {
   assert.equal(Core.parseQuickAdd('x #b', T).priority, 'B');
+});
+
+test('@time sets the deadline time alongside an @date', () => {
+  const p = Core.parseQuickAdd('dentist @fri @14:30', T);
+  assert.equal(p.deadline, '2026-07-24');
+  assert.equal(p.time, '14:30');
+  assert.equal(p.title, 'dentist');
+});
+
+test('a bare @time means today, and the hour is padded', () => {
+  const p = Core.parseQuickAdd('standup @9:00', T);
+  assert.equal(p.deadline, T);
+  assert.equal(p.time, '09:00');
+});
+
+test('a time range is kept whole', () => {
+  assert.equal(Core.parseQuickAdd('sync @fri @10:00-11:00', T).time, '10:00-11:00');
+});
+
+test('an impossible time stays in the title', () => {
+  const p = Core.parseQuickAdd('call bob @25:70', T);
+  assert.equal(p.time, null);
+  assert.equal(p.deadline, null);
+  assert.equal(p.title, 'call bob @25:70');
 });
