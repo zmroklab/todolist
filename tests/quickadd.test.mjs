@@ -64,3 +64,10 @@ test('an impossible time stays in the title', () => {
   assert.equal(p.deadline, null);
   assert.equal(p.title, 'call bob @25:70');
 });
+
+test('a repeater with only a time keeps the repeater (the time implies today)', () => {
+  const p = Core.parseQuickAdd('water plants +1w @14:30', T);
+  assert.equal(p.deadline, T);
+  assert.equal(p.time, '14:30');
+  assert.equal(p.repeat, '+1w');
+});

@@ -42,6 +42,6 @@
 * NEXT [#B] Standup with the team :work:
   DEADLINE: <2026-07-20 Mon 09:30 +1w>
   :PROPERTIES:
-  :ADDED:    [2026-07-18 Sat]
+  :ADDED:   [2026-07-18 Sat]
   :END:
-  Daily-ish; the time is what makes this sort above untimed Monday tasks.
+  Daily-ish; the 09:30 sorts it ahead of untimed tasks on the same day.
