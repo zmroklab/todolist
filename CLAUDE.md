@@ -226,12 +226,35 @@ test. Files that fail to parse render read-only and are never written.
   copy — this works because DOM `.task` order matches `App.visible` order
   (`taskRow` pushes in creation order). Don't dedupe by mangling `refKey`,
   it is identity for key-path mutations.
+- **Touch UI** is on under `@media (max-width: 720px), (pointer: coarse)`;
+  `TOUCH_MQ`/`isTouchUI()` in APP use the identical string — change both or
+  neither. Every touch control is a `[data-cmd]` button that runs
+  `runCommand(id)`, the same table the `keydown` handler dispatches to; ids
+  are the shortcut keys (`'Alt+ArrowUp'`/`'Alt+ArrowDown'` for reorder). A new
+  shortcut gets a touch entry by adding a button, never a parallel
+  implementation.
+- The inline editor's touch **Save/Cancel** buttons suspend the blur-close
+  (`pressing`) from `pointerdown` until their click, with a pointerup + 400 ms
+  fallback: a tap blurs the input *before* the click arrives, so a plain
+  `onclick` Save closes the editor without committing.
+- `body.typing` (hides the action bar over the virtual keyboard) is
+  recomputed from `document.activeElement` by `syncTyping()` on focus changes
+  and DOM mutations — never trust `focusout` alone. Measured in Chrome
+  (2026-09): an input removed while focused fires neither `blur` nor
+  `focusout`, and one blurred into its own removal fires `blur` but no
+  `focusout`; either way the bar used to stay hidden.
+- The mobile block at the end of `ui-e2e.mjs` taps with raw
+  `Input.dispatchTouchEvent` touchStart/touchEnd — `Input.synthesizeTapGesture`
+  never produces a click in headless Chrome. `tapEl` refuses a tap whose point
+  would hit a different element (hidden, covered by a sheet), which is how a
+  test once "passed" by tapping a sheet button instead of empty space.
 
 ### Known accepted limitations
 
 Same-parent-only drag-and-drop and reordering (no re-parenting), no CRLF
 support, duplicate sibling headings collide. Local folders are Chromium-desktop
 only (File System Access API); mobile uses the Google Drive backend instead.
+Reordering on touch is ↑/↓ in the ⋯ sheet, not drag-and-drop.
 Drive uses `drive.file` scope, so files not yet individually picked through
 `pickDriveFiles` (Files panel `g`) stay invisible to the app even though
 they're sitting right in the connected folder — this needs one picker pass
