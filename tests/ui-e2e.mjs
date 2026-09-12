@@ -1640,9 +1640,13 @@ async function tapEl(expr) {
     if (!el) return null;
     el.scrollIntoView({ block: 'center' });
     const b = el.getBoundingClientRect();
-    return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+    const x = b.left + b.width / 2, y = b.top + b.height / 2;
+    // a hidden or covered target would silently tap whatever is on top instead
+    const hit = document.elementFromPoint(x, y);
+    return { x, y, ok: !!hit && el.contains(hit), hit: hit ? hit.tagName + '#' + (hit.id || hit.className) : null };
   })()`);
   if (!r) { check('tap target exists: ' + expr, false); return false; }
+  if (!r.ok) { check('tap lands on its target: ' + expr, false, 'would hit ' + r.hit); return false; }
   await cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: r.x, y: r.y }] });
   await cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await sleep(250);
@@ -1699,8 +1703,9 @@ check('phone sheet: priority A is written and the sheet stays open',
 await tapEl(`$('#more-close')`);
 check('phone sheet: ✕ closes it', await evaljs(`$('#more-sheet').hidden`));
 await tapEl(`$('#more-btn')`);
-await tapEl(titleEl('Phone two'));
-check('phone sheet: tapping outside closes it', await evaljs(`$('#more-sheet').hidden`));
+await tapEl(`$('#hint')`);   // in the sticky header: never under the sheet
+check('phone sheet: tapping outside closes it without running anything',
+      await evaljs(`$('#more-sheet').hidden && !document.querySelector('.editor')`));
 
 // --- note chip toggles expand ---
 check('phone note chip: fixture loads', await resetHome('* TODO Phone one :errand:\n  a note\n* TODO Phone two\n'));
@@ -1735,6 +1740,39 @@ const heic = await evaljs(`(async () => {
 })()`);
 check('phone attach: an unsupported image type is refused with a toast',
       heic.same && /Unsupported image type/.test(heic.toast), JSON.stringify(heic));
+
+// --- editor Save/Cancel: a tap blurs the input before the button's click ---
+check('phone editor: fixture loads', await resetHome('* TODO Phone one :errand:\n* TODO Phone two\n'));
+await tapEl(titleEl('Phone one'));
+await tapEl(`$('#actionbar [data-cmd="e"]')`);
+await evaljs(`(() => { document.querySelector('.editor input').value = ''; return true; })()`);
+await cdp('Input.insertText', { text: 'Phone one edited :errand:' });
+await tapEl(`document.querySelector('.editor .ed-save')`);
+const saved = await evaljs(`(async () => { await syncIdle();
+  return { file: __files.get('home.org'), open: !!document.querySelector('.editor'),
+           bar: getComputedStyle($('#actionbar')).display }; })()`);
+check('phone editor: Save commits the edit (blur does not discard it)',
+      saved.file.startsWith('* TODO Phone one edited :errand:\n') && !saved.open, JSON.stringify(saved));
+check('phone editor: the action bar comes back once the editor is gone', saved.bar === 'flex', JSON.stringify(saved));
+
+await tapEl(titleEl('Phone one edited'));
+await tapEl(`$('#actionbar [data-cmd="e"]')`);
+await cdp('Input.insertText', { text: ' junk' });
+await tapEl(`document.querySelector('.editor .ed-cancel')`);
+const cancelled = await evaljs(`(async () => { await syncIdle();
+  return { file: __files.get('home.org'), open: !!document.querySelector('.editor') }; })()`);
+check('phone editor: Cancel closes without writing',
+      cancelled.file === '* TODO Phone one edited :errand:\n* TODO Phone two\n' && !cancelled.open, JSON.stringify(cancelled));
+
+await tapEl(titleEl('Phone one edited'));
+await tapEl(`$('#actionbar [data-cmd="N"]')`);
+await cdp('Input.insertText', { text: 'from the phone' });
+await tapEl(`document.querySelector('.editor .ed-save')`);
+const noted = await evaljs(`(async () => { await syncIdle();
+  return { file: __files.get('home.org'),
+           shown: [...document.querySelectorAll('.body')].some(b => b.textContent.includes('from the phone')) }; })()`);
+check('phone editor: notes Save writes the note and expands the task',
+      noted.file.startsWith('* TODO Phone one edited :errand:\n  from the phone\n') && noted.shown, JSON.stringify(noted));
 
 // ---- mobile teardown
 await cdp('Emulation.setTouchEmulationEnabled', { enabled: false });

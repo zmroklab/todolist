@@ -109,6 +109,9 @@ h3 { font-size:13px; color:var(--muted); margin:10px 0 2px; }
   #more-sheet .sheet-row button { flex:1 1 0; min-height:44px; border:1px solid var(--line); border-radius:8px; background:#fff; font:inherit; }
   #more-sheet button:disabled { opacity:.35; }
   #more-sheet .danger { color:#b3261e; }
+  .editor .editor-btns { display:flex; gap:8px; margin:6px 0 4px; }
+  .editor .editor-btns button { flex:1 1 0; min-height:44px; border-radius:8px; font:inherit; border:1px solid var(--line); background:#fff; }
+  .editor .editor-btns .ed-save { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
 }
 [hidden] { display:none !important; }
 </style>
@@ -1718,10 +1721,17 @@ function renderActionState() {
   const none = !selRef();
   document.querySelectorAll('.tcmd').forEach(b => { b.disabled = none; });
 }
-// the bar would otherwise float above the virtual keyboard, over the editor
-document.addEventListener('focusin', e =>
-  document.body.classList.toggle('typing', /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)));
-document.addEventListener('focusout', () => document.body.classList.remove('typing'));
+// The bar would otherwise float above the virtual keyboard, over the editor.
+// Derived from activeElement rather than trusted from focusout: Chrome fires no
+// focusout for an input removed while focused (the inline editor closing, a
+// panel re-render), which left the bar hidden until the next focus change.
+function syncTyping() {
+  const a = document.activeElement;
+  document.body.classList.toggle('typing', !!a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName));
+}
+document.addEventListener('focusin', syncTyping);
+document.addEventListener('focusout', () => setTimeout(syncTyping));   // activeElement settles after focusout
+new MutationObserver(syncTyping).observe(document.body, { childList: true, subtree: true });
 
 // --- write-back: optimistic on screen, durable in the background -----------
 // saveFile applies the mutation to the in-memory parse and renders right away,
@@ -2437,12 +2447,21 @@ function inlineEdit(initial, placeholder, onCommit, opts = {}) {
   inp.value = initial;
   inp.placeholder = placeholder;
   if (opts.multiline) inp.rows = Math.max(3, initial.split('\n').length + 1);
-  box.append(inp);
+  else inp.enterKeyHint = 'done';
+  // a phone keyboard has no Esc and no Cmd/Ctrl+Enter
+  const btns = div('editor-btns touch-only');
+  const save = document.createElement('button');
+  save.className = 'ed-save'; save.textContent = 'Save';
+  const cancel = document.createElement('button');
+  cancel.className = 'ed-cancel'; cancel.textContent = 'Cancel';
+  btns.append(save, cancel);
+  box.append(inp, btns);
   row.after(box);
   inp.focus();
   // multiline: cursor at end (select-all would make one keystroke wipe the notes)
   if (opts.multiline) inp.setSelectionRange(inp.value.length, inp.value.length);
   else inp.select();
+  if (isTouchUI()) box.scrollIntoView({ block: 'center' });   // keep it above the virtual keyboard
   // Removing a focused element fires blur synchronously mid-removal, so the
   // Enter branch and the blur handler must share one idempotent close() —
   // two bare box.remove() calls re-enter and throw before onCommit runs.
@@ -2453,16 +2472,35 @@ function inlineEdit(initial, placeholder, onCommit, opts = {}) {
     box.remove();
     if (renderPending) render();          // a background render waited for this
   };
+  const commit = async () => {
+    const v = opts.multiline ? inp.value : inp.value.trim();
+    close();
+    await onCommit(v);
+  };
   inp.onkeydown = async e => {
     e.stopPropagation();
     if (e.key === 'Escape') close();
-    if (e.key === 'Enter' && (!opts.multiline || e.metaKey || e.ctrlKey)) {
-      const v = opts.multiline ? inp.value : inp.value.trim();
-      close();
-      await onCommit(v);
-    }
+    if (e.key === 'Enter' && (!opts.multiline || e.metaKey || e.ctrlKey)) await commit();
   };
-  inp.onblur = close;
+  // A tap on Save blurs the input before Save's click arrives, and blur closes
+  // the editor — so a press that starts on a button suspends the blur-close
+  // until its click settles it. pointerup + 400 ms covers a press that never
+  // becomes a click (finger slid off); touch clicks can land a task after
+  // pointerup, which is why this isn't a 0 ms timeout.
+  let pressing = false;
+  for (const b of [save, cancel]) {
+    b.onpointerdown = e => { pressing = true; e.preventDefault(); };
+    b.onmousedown = e => e.preventDefault();   // keep focus in the input where the browser allows it
+    b.onpointerup = () => setTimeout(() => {
+      if (!pressing) return;
+      pressing = false;
+      if (document.activeElement !== inp) close();
+    }, 400);
+    b.onpointercancel = () => { pressing = false; if (!closed) inp.focus(); };
+  }
+  save.onclick = () => { pressing = false; commit(); };
+  cancel.onclick = () => { pressing = false; close(); };
+  inp.onblur = () => { if (!pressing) close(); };
 }
 
 document.addEventListener('keydown', async e => {
