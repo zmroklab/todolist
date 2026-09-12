@@ -1628,6 +1628,67 @@ const viaAlt = await evaljs(`(async () => { await syncIdle(); return __files.get
 check('runCommand Alt+ArrowDown moves the selected task down',
       viaAlt === '* TODO Cmd two\n* NEXT [#A] Cmd one\n', JSON.stringify(viaAlt));
 
+// ---- mobile: touch UI -------------------------------------------------------
+// Taps are trusted touch events, so focus/blur ordering is what a phone does —
+// that is the whole point of the editor Save-button check later. Raw
+// touchStart/touchEnd, not Input.synthesizeTapGesture: in headless Chrome the
+// synthesized gesture stops after pointerdown/touchstart and never clicks.
+async function tapEl(expr) {
+  const r = await evaljs(`(() => {
+    const el = ${expr};
+    if (!el) return null;
+    el.scrollIntoView({ block: 'center' });
+    const b = el.getBoundingClientRect();
+    return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+  })()`);
+  if (!r) { check('tap target exists: ' + expr, false); return false; }
+  await cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: r.x, y: r.y }] });
+  await cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await sleep(250);
+  return true;
+}
+const titleEl = t => `[...document.querySelectorAll('.task .title')].find(el => el.textContent === ${JSON.stringify(t)})`;
+
+const deskBar = await evaljs(`getComputedStyle($('#actionbar')).display`);
+check('desktop: the action bar is not shown', deskBar === 'none', deskBar);
+
+await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 3, mobile: true });
+await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+await sleep(400);
+check('phone: fixture loads', await resetHome('* TODO Phone one :errand:\n* TODO Phone two\n'));
+
+const layout = await evaljs(`({ bar: getComputedStyle($('#actionbar')).display,
+                                 qa: getComputedStyle($('#quickadd')).display,
+                                 touch: isTouchUI() })`);
+check('phone: action bar and quick-add shown, isTouchUI true',
+      layout.bar === 'flex' && layout.qa !== 'none' && layout.touch === true, JSON.stringify(layout));
+
+const noSel = await evaljs(`(() => { App.sel = null; renderActionState();
+  const r = [...document.querySelectorAll('#actionbar .tcmd')].every(b => b.disabled);
+  render(); return r; })()`);
+check('phone: task buttons are disabled with no selection', noSel === true);
+
+await tapEl(titleEl('Phone two'));
+const tapSel = await evaljs(`({ sel: App.sel,
+  enabled: [...document.querySelectorAll('#actionbar .tcmd')].every(b => !b.disabled),
+  draggable: document.querySelector('.task').draggable })`);
+check('phone: tapping a row selects it and enables the action bar',
+      tapSel.sel === 'home\t* TODO Phone two' && tapSel.enabled, JSON.stringify(tapSel));
+check('phone: rows are not draggable', tapSel.draggable === false, JSON.stringify(tapSel));
+
+await tapEl(`$('#actionbar [data-cmd="d"]')`);
+const tapDone = await evaljs(`(async () => { await syncIdle(); return __files.get('home.org'); })()`);
+check('phone: ✓ marks the selected task done and writes it', /^\* DONE Phone two$/m.test(tapDone), tapDone);
+
+await evaljs(`($('#quickadd').focus(), true)`);
+const typingBar = await evaljs(`getComputedStyle($('#actionbar')).display`);
+await evaljs(`($('#quickadd').blur(), true)`);
+check('phone: the action bar hides while typing', typingBar === 'none', typingBar);
+
+// ---- mobile teardown
+await cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
+await cdp('Emulation.clearDeviceMetricsOverride');
+
 ws.close();
 chrome.kill();
 server.close();

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title>Org Todo</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect x='1' y='1' width='14' height='14' rx='3.5' fill='none' stroke='%232563eb' stroke-width='1.8'/><path d='M4.4 8.2 L7 10.8 L11.8 5.6' fill='none' stroke='%232563eb' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <style>
 :root { --bg:#fafafa; --fg:#1a1a1a; --muted:#777; --line:#e4e4e4; --sel:#dbeafe; --accent:#2563eb; }
 * { box-sizing: border-box; }
@@ -79,6 +79,26 @@ h3 { font-size:13px; color:var(--muted); margin:10px 0 2px; }
 .srow .sexpr { flex:1 1 auto; }
 .srow .serr { color:#b3261e; font-size:12px; white-space:nowrap; }
 #share-hint { color:var(--muted); font-size:12px; margin-top:10px; }
+/* ---- touch UI: phones and touch screens. The media query must match TOUCH_MQ in APP. */
+#menu-btn, #actionbar, #more-sheet, .touch-only { display:none; }
+@media (max-width: 720px), (pointer: coarse) {
+  body { touch-action:manipulation; }
+  input, textarea, select { font-size:16px; }   /* below 16px iOS zooms the page on focus */
+  header { padding:8px 10px; }
+  main { padding:8px 8px calc(96px + env(safe-area-inset-bottom)); }
+  .task { min-height:44px; padding:8px; }
+  .title { min-width:0; }
+  .chip { font-size:13px; padding:4px 10px; }
+  .touch-only { display:revert; }
+  #actionbar { display:flex; position:fixed; left:0; right:0; bottom:0; z-index:5; background:#fff;
+               border-top:1px solid var(--line); padding:4px 4px calc(4px + env(safe-area-inset-bottom)); }
+  #actionbar button { flex:1 1 0; min-height:52px; border:none; background:none; font:inherit; font-size:11px;
+                      color:var(--fg); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; }
+  #actionbar .ico { font-size:20px; line-height:1; }
+  #actionbar button:disabled { opacity:.35; }
+  body.typing #actionbar { display:none; }
+  #toast { bottom:calc(72px + env(safe-area-inset-bottom)); }
+}
 [hidden] { display:none !important; }
 </style>
 </head>
@@ -208,6 +228,14 @@ match and wins; <code>and</code> between words is optional.
 Example: <code>flo and !elena and !volha</code>. Esc closes.</p>
 </div>
 <div id="toast" hidden></div>
+<nav id="actionbar" aria-label="Task actions">
+  <button class="tcmd" data-cmd="d"><span class="ico">✓</span>done</button>
+  <button class="tcmd" data-cmd="n"><span class="ico">★</span>next</button>
+  <button class="tcmd" data-cmd="e"><span class="ico">✎</span>edit</button>
+  <button class="tcmd" data-cmd="s"><span class="ico">⏰</span>date</button>
+  <button class="tcmd" data-cmd="N"><span class="ico">≡</span>notes</button>
+  <button id="more-btn"><span class="ico">⋯</span>more</button>
+</nav>
 <script>
 // ===== CORE START =====
 const Core = (() => {
@@ -706,6 +734,9 @@ const App = {
   share: { presets: loadSharePresets(), active: localStorage.getItem('shareActive') },
   sharePanel: { open: false },
 };
+// Must match the @media rule that turns the touch layout on in <style>.
+const TOUCH_MQ = matchMedia('(max-width: 720px), (pointer: coarse)');
+function isTouchUI() { return TOUCH_MQ.matches; }
 
 function todayIso() {
   const d = new Date();
@@ -1425,6 +1456,7 @@ function updateSelClass() {
     el.classList.toggle('sel', el === cur);
     el.classList.toggle('sel-dup', el !== cur && el.dataset.rk === App.sel);
   }
+  renderActionState();
 }
 
 function renderLinkified(el, text) {
@@ -1512,7 +1544,7 @@ function taskRow(ref, mode) {
     App.selPos = pos;
     updateSelClass();
   };
-  row.draggable = true;
+  row.draggable = !isTouchUI();   // touch reorders via the ⋯ sheet; drag fights long-press
   row.ondragstart = e => {
     if (App.sort !== 'topic') { e.preventDefault(); toast('Reordering needs topic order'); return; }
     e.dataTransfer.setData('text/plain', row.dataset.rk);
@@ -1616,6 +1648,23 @@ document.addEventListener('visibilitychange', () => {
 });
 $('#help-btn').onclick = () => { $('#help').hidden = !$('#help').hidden; };
 $('#help-close').onclick = () => { $('#help').hidden = true; };
+
+// --- touch UI ---
+TOUCH_MQ.addEventListener('change', () => render());
+// every touch control is a [data-cmd] running the command its shortcut runs
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-cmd]');
+  if (!b || b.disabled) return;
+  runCommand(b.dataset.cmd, NO_EVENT);
+});
+function renderActionState() {
+  const none = !selRef();
+  document.querySelectorAll('.tcmd').forEach(b => { b.disabled = none; });
+}
+// the bar would otherwise float above the virtual keyboard, over the editor
+document.addEventListener('focusin', e =>
+  document.body.classList.toggle('typing', /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)));
+document.addEventListener('focusout', () => document.body.classList.remove('typing'));
 
 // --- write-back: optimistic on screen, durable in the background -----------
 // saveFile applies the mutation to the in-memory parse and renders right away,
